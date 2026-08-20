@@ -6,6 +6,9 @@ on:
       - main
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build-and-release:
     runs-on: ubuntu-latest
@@ -37,11 +40,18 @@ jobs:
       - name: Build
         run: gradle clean build --no-daemon
 
+      - name: Upload JAR artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: newgen6-pojav
+          path: build/libs/*.jar
+
       - name: Create GitHub Release and upload jars
         uses: ncipollo/release-action@v1
         with:
+          token: ${{ secrets.GITHUB_TOKEN }}
           tag: release-${{ github.run_number }}
           name: Release ${{ github.run_number }} (main @ ${{ github.sha }})
-          files: build/libs/*.jar
+          artifacts: build/libs/*.jar
           draft: false
           prerelease: false
