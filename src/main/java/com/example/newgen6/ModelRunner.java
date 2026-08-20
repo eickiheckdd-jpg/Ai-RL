@@ -2,6 +2,7 @@ package com.example.newgen6;
 
 import ai.onnxruntime.NodeInfo;
 import ai.onnxruntime.OrtEnvironment;
+import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 
 import java.io.IOException;
@@ -44,10 +45,14 @@ public final class ModelRunner {
             OrtSession.SessionOptions options =
                     new OrtSession.SessionOptions();
 
-            session = environment.createSession(
-                    modelBytes,
-                    options
-            );
+            try {
+                session = environment.createSession(
+                        modelBytes,
+                        options
+                );
+            } finally {
+                options.close();
+            }
 
             System.out.println();
             System.out.println("=== NewGen6 ONNX Model ===");
@@ -111,14 +116,28 @@ public final class ModelRunner {
 
     public static void close() {
 
-        try {
-            if (session != null) {
+        if (session != null) {
+            try {
                 session.close();
+            } catch (OrtException e) {
+                System.err.println(
+                        "NewGen6: Failed to close ONNX session."
+                );
+                e.printStackTrace();
+            } finally {
                 session = null;
             }
-        } finally {
-            if (environment != null) {
+        }
+
+        if (environment != null) {
+            try {
                 environment.close();
+            } catch (OrtException e) {
+                System.err.println(
+                        "NewGen6: Failed to close ONNX environment."
+                );
+                e.printStackTrace();
+            } finally {
                 environment = null;
             }
         }
