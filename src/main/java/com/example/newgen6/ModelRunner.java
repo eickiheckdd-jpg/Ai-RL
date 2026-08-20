@@ -130,16 +130,8 @@ public final class ModelRunner {
         }
 
         if (environment != null) {
-            try {
-                environment.close();
-            } catch (OrtException e) {
-                System.err.println(
-                        "NewGen6: Failed to close ONNX environment."
-                );
-                e.printStackTrace();
-            } finally {
-                environment = null;
-            }
+            environment.close();
+            environment = null;
         }
     }
 }
