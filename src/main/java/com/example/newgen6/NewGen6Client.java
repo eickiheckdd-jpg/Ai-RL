@@ -17,16 +17,16 @@ public final class NewGen6Client implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
 
-        // Load and inspect the ONNX model.
+        // Load the ONNX model when the client starts.
         ModelRunner.initialize();
 
-        // C = ON/OFF
+        // C = toggle AI ON/OFF.
         toggleKey = KeyBindingHelper.registerKeyBinding(
                 new KeyMapping(
                         "key.newgen6.toggle",
                         InputConstants.Type.KEYSYM,
                         GLFW.GLFW_KEY_C,
-                        "key.category.newgen6.ai"
+                        KeyMapping.Category.MISC
                 )
         );
 
@@ -35,7 +35,7 @@ public final class NewGen6Client implements ClientModInitializer {
 
     private static void tick(Minecraft client) {
 
-        // Toggle AI with C.
+        // Detect C presses.
         while (toggleKey.consumeClick()) {
             enabled = !enabled;
 
@@ -43,25 +43,24 @@ public final class NewGen6Client implements ClientModInitializer {
                 client.player.displayClientMessage(
                         Component.literal(
                                 "NewGen6 AI: " +
-                                        (enabled ? "ON" : "OFF")
+                                (enabled ? "ON" : "OFF")
                         ),
                         true
                 );
             }
         }
 
-        // AI currently does not control anything yet.
-        // This stage only verifies that the ONNX model loads correctly.
+        // Do nothing while disabled.
         if (!enabled) {
             return;
         }
 
+        // Make sure we're actually in a world.
         if (client.player == null || client.level == null) {
             return;
         }
 
-        // Model inference will be connected here after
-        // we verify the ONNX input/output tensors.
+        // Model inference will be connected here next.
     }
 
     public static boolean isEnabled() {
