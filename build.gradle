@@ -15,7 +15,7 @@ dependencies {
     mappings loom.officialMojangMappings()
     modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_version}"
-    implementation files('libs/onnxruntime.jar')
+    implementation 'com.microsoft.onnxruntime:onnxruntime:1.29.0'
 }
 tasks.withType(JavaCompile).configureEach { it.options.release = 21 }
 java { sourceCompatibility = JavaVersion.VERSION_21; targetCompatibility = JavaVersion.VERSION_21; withSourcesJar() }
