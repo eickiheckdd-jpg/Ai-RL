@@ -20,7 +20,7 @@ public final class NewGen6Client implements ClientModInitializer {
                 "key.newgen6.toggle",
                 InputConstants.Type.KEYSYM,
                 GLFW.GLFW_KEY_C,
-                "key.category.newgen6.ai"
+                KeyMapping.Category.MISC
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(NewGen6Client::tick);
@@ -29,18 +29,25 @@ public final class NewGen6Client implements ClientModInitializer {
     private static void tick(Minecraft client) {
         while (toggleKey.consumeClick()) {
             enabled = !enabled;
+
             if (client.player != null) {
                 client.player.displayClientMessage(
-                    Component.literal("NewGen6 AI: " + (enabled ? "ON" : "OFF")),
+                    Component.literal(
+                        "NewGen6 AI: " + (enabled ? "ON" : "OFF")
+                    ),
                     true
                 );
             }
         }
 
-        if (!enabled || client.player == null || client.level == null) return;
+        if (!enabled || client.player == null || client.level == null) {
+            return;
+        }
 
-        // Safety placeholder: inference is intentionally not enabled until the
-        // exact 156-feature construction from combat_move_model.json is wired.
+        // Safety placeholder: inference is intentionally not enabled until
+        // the exact 156-feature construction from combat_move_model.json
+        // is wired.
+        //
         // This prevents feeding incorrectly ordered data to the trained model.
     }
 
