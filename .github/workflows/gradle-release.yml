@@ -34,8 +34,8 @@ jobs:
       - name: Grant execute permission for gradlew
         run: chmod +x gradlew || true
 
-      - name: Build (Gradle)
-        run: ./gradlew clean build --no-daemon
+      - name: Build
+        run: gradle clean build --no-daemon
 
       - name: Create GitHub Release and upload jars
         uses: ncipollo/release-action@v1
