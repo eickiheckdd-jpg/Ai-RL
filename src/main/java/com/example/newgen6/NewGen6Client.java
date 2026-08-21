@@ -46,18 +46,6 @@ public final class NewGen6Client implements ClientModInitializer {
 
     private static void tick(MinecraftClient client) {
 
-        /*
-         * Toggle NewGen6 with C.
-         *
-         * IMPORTANT:
-         * We are NOT initializing ONNX Runtime here yet.
-         *
-         * The previous crash happened when ONNX Runtime was
-         * initialized from the client tick, so we are keeping
-         * the Minecraft client completely independent from it
-         * until the runtime dependency is packaged correctly.
-         */
-
         while (toggleKey.wasPressed()) {
 
             enabled = !enabled;
@@ -77,24 +65,79 @@ public final class NewGen6Client implements ClientModInitializer {
                         true
                 );
             }
+
+            /*
+             * Start ONNX loading ONLY when the AI is
+             * switched ON for the first time.
+             *
+             * initializeAsync() does NOT block the
+             * Minecraft client thread.
+             */
+            if (enabled) {
+
+                if (!ModelRunner.isLoaded()
+                        && !ModelRunner.isLoading()) {
+
+                    ModelRunner.initializeAsync();
+
+                    if (client.player != null) {
+                        client.player.sendMessage(
+                                Text.literal(
+                                        "NewGen6: Loading AI model..."
+                                ),
+                                true
+                        );
+                    }
+                }
+            }
         }
 
         /*
-         * Nothing else happens while the AI is enabled yet.
-         *
-         * ONNX inference will be added after we fix
-         * ONNX Runtime's runtime packaging.
+         * AI is disabled.
+         * Do nothing else this tick.
          */
-
         if (!enabled) {
             return;
         }
 
+        /*
+         * Wait until Minecraft has a player and world.
+         */
         if (client.player == null || client.world == null) {
             return;
         }
 
-        // AI processing will be added here later.
+        /*
+         * The ONNX model is still loading.
+         *
+         * IMPORTANT:
+         * We do NOT wait here.
+         * We do NOT call the model from the main thread.
+         */
+        if (ModelRunner.isLoading()) {
+            return;
+        }
+
+        /*
+         * Model failed to load.
+         *
+         * Don't repeatedly try to load it every tick.
+         */
+        if (ModelRunner.hasFailed()) {
+            return;
+        }
+
+        /*
+         * The model is ready.
+         *
+         * This is where we will add actual AI inference
+         * later.
+         */
+        if (ModelRunner.isLoaded()) {
+
+            // AI inference will be added here.
+
+        }
     }
 
     public static boolean isEnabled() {
