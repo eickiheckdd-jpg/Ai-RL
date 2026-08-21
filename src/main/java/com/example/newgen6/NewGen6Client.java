@@ -21,8 +21,6 @@ public final class NewGen6Client implements ClientModInitializer {
 
     private static boolean enabled = false;
 
-    private static boolean modelInitializationAttempted = false;
-
     @Override
     public void onInitializeClient() {
 
@@ -49,8 +47,17 @@ public final class NewGen6Client implements ClientModInitializer {
     private static void tick(MinecraftClient client) {
 
         /*
-         * C toggles the AI.
+         * Toggle NewGen6 with C.
+         *
+         * IMPORTANT:
+         * We are NOT initializing ONNX Runtime here yet.
+         *
+         * The previous crash happened when ONNX Runtime was
+         * initialized from the client tick, so we are keeping
+         * the Minecraft client completely independent from it
+         * until the runtime dependency is packaged correctly.
          */
+
         while (toggleKey.wasPressed()) {
 
             enabled = !enabled;
@@ -61,6 +68,7 @@ public final class NewGen6Client implements ClientModInitializer {
             );
 
             if (client.player != null) {
+
                 client.player.sendMessage(
                         Text.literal(
                                 "NewGen6 AI: " +
@@ -72,79 +80,24 @@ public final class NewGen6Client implements ClientModInitializer {
         }
 
         /*
-         * Do absolutely nothing while AI is disabled.
+         * Nothing else happens while the AI is enabled yet.
+         *
+         * ONNX inference will be added after we fix
+         * ONNX Runtime's runtime packaging.
          */
+
         if (!enabled) {
             return;
         }
 
-        /*
-         * Wait until Minecraft has a player and world.
-         */
         if (client.player == null || client.world == null) {
             return;
         }
 
-        /*
-         * Initialize ONNX exactly once.
-         *
-         * This happens after Minecraft is fully running,
-         * rather than during Fabric's initial startup.
-         */
-        if (!modelInitializationAttempted) {
-
-            modelInitializationAttempted = true;
-
-            System.out.println(
-                    "NewGen6: Starting ONNX initialization..."
-            );
-
-            ModelRunner.initialize();
-
-            if (ModelRunner.isLoaded()) {
-
-                System.out.println(
-                        "NewGen6: ONNX initialization successful."
-                );
-
-                client.player.sendMessage(
-                        Text.literal(
-                                "NewGen6: AI model loaded"
-                        ),
-                        true
-                );
-
-            } else {
-
-                System.err.println(
-                        "NewGen6: ONNX initialization failed."
-                );
-
-                client.player.sendMessage(
-                        Text.literal(
-                                "NewGen6: AI model failed to load"
-                        ),
-                        true
-                );
-            }
-        }
-
-        /*
-         * IMPORTANT:
-         *
-         * There is currently NO AI movement,
-         * camera control, attacking, jumping, etc.
-         *
-         * We are only testing that the ONNX model
-         * can load successfully.
-         */
+        // AI processing will be added here later.
     }
 
     public static boolean isEnabled() {
         return enabled;
-    }
-
-    public static boolean isModelLoaded() {
-        return ModelRunner.isLoaded();
     }
 }
