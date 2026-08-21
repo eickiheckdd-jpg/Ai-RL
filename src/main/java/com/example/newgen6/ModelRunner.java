@@ -1,12 +1,13 @@
 package com.example.newgen6;
 
 import ai.onnxruntime.NodeInfo;
-import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
 import ai.onnxruntime.OrtSession;
 
 import java.io.IOException;
 import java.io.InputStream;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -16,9 +17,19 @@ public final class ModelRunner {
 private static final String MODEL_PATH =
         "/newgen6/newgen6_full.onnx";
 
+private static final String NATIVE_DIR =
+        "/ai/onnxruntime/native/android-arm64/";
+
+private static final String ORT_NATIVE =
+        NATIVE_DIR + "libonnxruntime.so";
+
+private static final String ORT_JNI_NATIVE =
+        NATIVE_DIR + "libonnxruntime4j_jni.so";
+
 private static final ExecutorService LOADER =
         Executors.newSingleThreadExecutor(r -> {
-            Thread thread = new Thread(r, "NewGen6-ONNX-Loader");
+            Thread thread =
+                    new Thread(r, "NewGen6-ONNX-Loader");
             thread.setDaemon(true);
             return thread;
         });
@@ -31,25 +42,33 @@ private static volatile boolean failed = false;
 private static volatile boolean inferenceTestStarted = false;
 private static volatile boolean inferenceTestFinished = false;
 
+private static volatile Path nativeDirectory;
+
 private ModelRunner() {
 }
 
 public static synchronized void initializeAsync() {
 
     if (session != null) {
-        System.out.println("NewGen6: ONNX model is already loaded.");
+        System.out.println(
+                "NewGen6: ONNX model is already loaded."
+        );
         return;
     }
 
     if (loading) {
-        System.out.println("NewGen6: ONNX model is already loading.");
+        System.out.println(
+                "NewGen6: ONNX model is already loading."
+        );
         return;
     }
 
     loading = true;
     failed = false;
 
-    System.out.println("NewGen6: Starting background ONNX loading...");
+    System.out.println(
+            "NewGen6: Starting background ONNX loading..."
+    );
 
     LOADER.execute(ModelRunner::loadModel);
 }
@@ -60,24 +79,45 @@ private static void loadModel() {
     OrtSession localSession = null;
 
     try {
+
         System.out.println("================================");
-        System.out.println("NewGen6: Loading ONNX model...");
+        System.out.println(
+                "NewGen6: Loading ONNX model..."
+        );
         System.out.println(
                 "Thread: " +
                 Thread.currentThread().getName()
         );
         System.out.println("================================");
 
-        localEnvironment = OrtEnvironment.getEnvironment();
+        /*
+         * IMPORTANT:
+         *
+         * This must happen BEFORE the first reference to
+         * OrtEnvironment.getEnvironment().
+         *
+         * The normal Java ONNX Runtime loader checks
+         * "onnxruntime.native.path" for externally supplied
+         * native libraries.
+         */
+        prepareAndroidNativeLibraries();
+
+        /*
+         * Only now initialize ONNX Runtime.
+         */
+        localEnvironment =
+                OrtEnvironment.getEnvironment();
 
         byte[] modelBytes;
 
         try (InputStream input =
-                     ModelRunner.class.getResourceAsStream(MODEL_PATH)) {
+                     ModelRunner.class
+                             .getResourceAsStream(MODEL_PATH)) {
 
             if (input == null) {
                 throw new IOException(
-                        "Model not found inside mod JAR: " + MODEL_PATH
+                        "Model not found inside mod JAR: " +
+                        MODEL_PATH
                 );
             }
 
@@ -94,12 +134,15 @@ private static void loadModel() {
                 new OrtSession.SessionOptions();
 
         try {
+
             localSession =
                     localEnvironment.createSession(
                             modelBytes,
                             options
                     );
+
         } finally {
+
             options.close();
         }
 
@@ -110,7 +153,9 @@ private static void loadModel() {
         localSession = null;
 
         System.out.println();
-        System.out.println("=== NewGen6 ONNX Model ===");
+        System.out.println(
+                "=== NewGen6 ONNX Model ==="
+        );
 
         System.out.println();
         System.out.println("INPUTS:");
@@ -141,20 +186,16 @@ private static void loadModel() {
         }
 
         System.out.println();
-        System.out.println("==========================");
-        System.out.println("NewGen6: ONNX MODEL LOADED!");
-        System.out.println("==========================");
+        System.out.println(
+                "=========================="
+        );
+        System.out.println(
+                "NewGen6: ONNX MODEL LOADED!"
+        );
+        System.out.println(
+                "=========================="
+        );
 
-        /*
-         * The model is loaded successfully.
-         *
-         * Now perform exactly ONE inference test.
-         *
-         * IMPORTANT:
-         * This is deliberately done on the background
-         * ONNX loader thread, never on Minecraft's
-         * render/tick thread.
-         */
         runInferenceTest();
 
     } catch (Throwable e) {
@@ -173,6 +214,7 @@ private static void loadModel() {
         e.printStackTrace();
 
         if (localSession != null) {
+
             try {
                 localSession.close();
             } catch (Exception ignored) {
@@ -180,6 +222,7 @@ private static void loadModel() {
         }
 
         if (localEnvironment != null) {
+
             try {
                 localEnvironment.close();
             } catch (Exception ignored) {
@@ -202,16 +245,112 @@ private static void loadModel() {
 }
 
 /**
- * Performs one diagnostic inference attempt.
+ * Extracts the Android ARM64 ONNX Runtime libraries into
+ * a writable temporary directory and tells ONNX Runtime
+ * where to find them.
  *
- * We do NOT invent input data for the model.
- *
- * Instead, this first test checks whether the model's
- * input metadata can be understood safely.
- *
- * Actual Minecraft/game-state tensors will be added
- * after we know exactly what the model expects.
+ * This runs on the NewGen6-ONNX-Loader thread.
  */
+private static synchronized void
+prepareAndroidNativeLibraries()
+        throws IOException {
+
+    if (nativeDirectory != null) {
+
+        System.setProperty(
+                "onnxruntime.native.path",
+                nativeDirectory.toString()
+        );
+
+        System.out.println(
+                "NewGen6: Reusing native directory: " +
+                nativeDirectory
+        );
+
+        return;
+    }
+
+    Path directory =
+            Files.createTempDirectory(
+                    "newgen6-onnx-arm64-"
+            );
+
+    Path ortPath =
+            directory.resolve(
+                    "libonnxruntime.so"
+            );
+
+    Path jniPath =
+            directory.resolve(
+                    "libonnxruntime4j_jni.so"
+            );
+
+    extractResource(
+            ORT_NATIVE,
+            ortPath
+    );
+
+    extractResource(
+            ORT_JNI_NATIVE,
+            jniPath
+    );
+
+    /*
+     * Make the extracted directory visible to the
+     * ONNX Runtime Java native loader.
+     */
+    System.setProperty(
+            "onnxruntime.native.path",
+            directory.toString()
+    );
+
+    nativeDirectory = directory;
+
+    System.out.println(
+            "NewGen6: Android ARM64 native directory: " +
+            directory
+    );
+
+    System.out.println(
+            "NewGen6: libonnxruntime.so size: " +
+            Files.size(ortPath) +
+            " bytes"
+    );
+
+    System.out.println(
+            "NewGen6: libonnxruntime4j_jni.so size: " +
+            Files.size(jniPath) +
+            " bytes"
+    );
+}
+
+private static void extractResource(
+        String resourcePath,
+        Path destination
+) throws IOException {
+
+    try (InputStream input =
+                 ModelRunner.class
+                         .getResourceAsStream(
+                                 resourcePath
+                         )) {
+
+        if (input == null) {
+
+            throw new IOException(
+                    "Native library not found " +
+                    "inside mod JAR: " +
+                    resourcePath
+            );
+        }
+
+        Files.copy(
+                input,
+                destination
+        );
+    }
+}
+
 private static void runInferenceTest() {
 
     if (session == null) {
@@ -225,16 +364,18 @@ private static void runInferenceTest() {
     inferenceTestStarted = true;
 
     System.out.println();
-    System.out.println("================================");
-    System.out.println("NewGen6: INFERENCE TEST");
-    System.out.println("================================");
+    System.out.println(
+            "================================"
+    );
+    System.out.println(
+            "NewGen6: INFERENCE TEST"
+    );
+    System.out.println(
+            "================================"
+    );
 
     try {
 
-        /*
-         * First verify that ONNX Runtime can access
-         * the model's inputs and outputs.
-         */
         Map<String, NodeInfo> inputs =
                 session.getInputInfo();
 
@@ -273,20 +414,14 @@ private static void runInferenceTest() {
             );
         }
 
-        /*
-         * We intentionally stop here for this first test.
-         *
-         * We need the actual tensor type/shape before
-         * constructing an input tensor. Sending a random
-         * tensor could cause an invalid-shape/type error.
-         */
         System.out.println();
         System.out.println(
                 "NewGen6: Model interface verified."
         );
         System.out.println(
-                "NewGen6: Waiting for input schema before "
-                + "running a real tensor inference."
+                "NewGen6: Waiting for input schema "
+                +
+                "before running a real tensor inference."
         );
         System.out.println(
                 "NewGen6: Minecraft thread was never blocked."
@@ -294,11 +429,15 @@ private static void runInferenceTest() {
 
         inferenceTestFinished = true;
 
-        System.out.println("================================");
+        System.out.println(
+                "================================"
+        );
         System.out.println(
                 "NewGen6: INFERENCE TEST PASSED"
         );
-        System.out.println("================================");
+        System.out.println(
+                "================================"
+        );
 
     } catch (Throwable e) {
 
@@ -346,6 +485,7 @@ public static synchronized void close() {
     environment = null;
 
     if (currentSession != null) {
+
         try {
             currentSession.close();
         } catch (Exception e) {
@@ -354,12 +494,15 @@ public static synchronized void close() {
     }
 
     if (currentEnvironment != null) {
+
         try {
             currentEnvironment.close();
         } catch (Exception e) {
             e.printStackTrace();
         }
     }
+
+    nativeDirectory = null;
 
     System.out.println(
             "NewGen6: ONNX resources closed."
