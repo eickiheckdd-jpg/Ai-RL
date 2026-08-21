@@ -63,8 +63,6 @@ public final class NewGen6Client implements ClientModInitializer {
             }
 
             if (enabled && !ModelRunner.isLoaded()) {
-                ModelRunner.initialize();
-
                 if (client.player != null) {
 
                     String status =
