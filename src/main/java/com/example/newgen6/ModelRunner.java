@@ -2,7 +2,6 @@ package com.example.newgen6;
 
 import ai.onnxruntime.NodeInfo;
 import ai.onnxruntime.OrtEnvironment;
-import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 
 import java.io.IOException;
@@ -21,6 +20,10 @@ public final class ModelRunner {
     }
 
     public static void initialize() {
+        if (session != null) {
+            return;
+        }
+
         try {
             System.out.println("================================");
             System.out.println("NewGen6: Loading ONNX model...");
@@ -35,7 +38,7 @@ public final class ModelRunner {
 
                 if (input == null) {
                     throw new IOException(
-                            "Model not found: " + MODEL_PATH
+                            "Model not found inside mod JAR: " + MODEL_PATH
                     );
                 }
 
@@ -60,8 +63,8 @@ public final class ModelRunner {
             System.out.println();
             System.out.println("INPUTS:");
 
-            for (Map.Entry<String, NodeInfo> entry
-                    : session.getInputInfo().entrySet()) {
+            for (Map.Entry<String, NodeInfo> entry :
+                    session.getInputInfo().entrySet()) {
 
                 System.out.println(
                         "  " +
@@ -74,8 +77,8 @@ public final class ModelRunner {
             System.out.println();
             System.out.println("OUTPUTS:");
 
-            for (Map.Entry<String, NodeInfo> entry
-                    : session.getOutputInfo().entrySet()) {
+            for (Map.Entry<String, NodeInfo> entry :
+                    session.getOutputInfo().entrySet()) {
 
                 System.out.println(
                         "  " +
@@ -99,6 +102,18 @@ public final class ModelRunner {
             System.err.println();
 
             e.printStackTrace();
+
+            // Do not crash Minecraft if ONNX fails.
+            session = null;
+
+            if (environment != null) {
+                try {
+                    environment.close();
+                } catch (Exception ignored) {
+                }
+
+                environment = null;
+            }
         }
     }
 
@@ -115,22 +130,23 @@ public final class ModelRunner {
     }
 
     public static void close() {
-
         if (session != null) {
             try {
                 session.close();
-            } catch (OrtException e) {
-                System.err.println(
-                        "NewGen6: Failed to close ONNX session."
-                );
+            } catch (Exception e) {
                 e.printStackTrace();
-            } finally {
-                session = null;
             }
+
+            session = null;
         }
 
         if (environment != null) {
-            environment.close();
+            try {
+                environment.close();
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+
             environment = null;
         }
     }
