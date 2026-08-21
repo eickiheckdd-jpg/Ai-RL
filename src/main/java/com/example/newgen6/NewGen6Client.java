@@ -1,31 +1,31 @@
 package com.example.newgen6;
 
-import com.mojang.blaze3d.platform.InputConstants;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.minecraft.client.KeyMapping;
-import net.minecraft.client.Minecraft;
-import net.minecraft.network.chat.Component;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.util.InputUtil;
 import org.lwjgl.glfw.GLFW;
 
 public final class NewGen6Client implements ClientModInitializer {
 
-    private static KeyMapping toggleKey;
-
+    private static KeyBinding toggleKey;
     private static boolean enabled = false;
 
     @Override
     public void onInitializeClient() {
 
-        System.out.println("NewGen6: Client initializing...");
+        System.out.println("================================");
+        System.out.println("NewGen6 client initializing...");
+        System.out.println("================================");
 
         toggleKey = KeyBindingHelper.registerKeyBinding(
-                new KeyMapping(
+                new KeyBinding(
                         "key.newgen6.toggle",
-                        InputConstants.Type.KEYSYM,
+                        InputUtil.Type.KEYSYM,
                         GLFW.GLFW_KEY_C,
-                        KeyMapping.Category.MISC
+                        "category.newgen6"
                 )
         );
 
@@ -33,76 +33,30 @@ public final class NewGen6Client implements ClientModInitializer {
                 NewGen6Client::tick
         );
 
-        /*
-         * IMPORTANT:
-         *
-         * We do NOT load ONNX during Minecraft's initial startup.
-         * Pressing C first enables the system and attempts to load
-         * the model.
-         *
-         * This prevents an ONNX/native-runtime problem from taking
-         * down the entire Minecraft client during startup.
-         */
+        System.out.println("NewGen6 keybind registered: C");
     }
 
-    private static void tick(Minecraft client) {
+    private static void tick(MinecraftClient client) {
 
-        while (toggleKey.consumeClick()) {
+        while (toggleKey.wasPressed()) {
 
             enabled = !enabled;
 
-            if (client.player != null) {
+            System.out.println(
+                    "NewGen6: " +
+                    (enabled ? "ENABLED" : "DISABLED")
+            );
 
-                client.player.displayClientMessage(
-                        Component.literal(
-                                "NewGen6 AI: " +
+            if (client.player != null) {
+                client.player.sendMessage(
+                        net.minecraft.text.Text.literal(
+                                "NewGen6: " +
                                 (enabled ? "ON" : "OFF")
                         ),
                         true
                 );
             }
-
-            if (enabled && !ModelRunner.isLoaded()) {
-                if (client.player != null) {
-
-                    String status =
-                            ModelRunner.isLoaded()
-                                    ? "Model loaded"
-                                    : "Model failed to load";
-
-                    client.player.displayClientMessage(
-                            Component.literal(
-                                    "NewGen6: " + status
-                            ),
-                            true
-                    );
-                }
-            }
         }
-
-        if (!enabled) {
-            return;
-        }
-
-        if (client.player == null) {
-            return;
-        }
-
-        if (client.level == null) {
-            return;
-        }
-
-        /*
-         * AI inference will be added here after we verify:
-         *
-         * 1. ONNX Runtime loads.
-         * 2. newgen6_full.onnx loads.
-         * 3. We can read its input shape.
-         * 4. We know exactly what the JSON feature ordering is.
-         * 5. We know exactly what each model output/action represents.
-         *
-         * We should NOT guess those values.
-         */
     }
 
     public static boolean isEnabled() {
