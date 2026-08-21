@@ -26,7 +26,7 @@ public final class NewGen6Client implements ClientModInitializer {
                         "key.newgen6.toggle",
                         InputUtil.Type.KEYSYM,
                         GLFW.GLFW_KEY_C,
-                        "category.newgen6"
+                        KeyBinding.Category.MISC
                 )
         );
 
@@ -68,11 +68,10 @@ public final class NewGen6Client implements ClientModInitializer {
         }
 
         /*
-         * AI inference will be added here later.
+         * AI inference will be added later.
          *
-         * For now this intentionally does nothing.
-         * The goal is to verify that the Fabric client
-         * initializes and runs without crashing.
+         * For now this section intentionally does nothing.
+         * We are testing the basic Fabric client first.
          */
     }
 
