@@ -1,36 +1,28 @@
 package com.example.newgen6;
 
 import ai.onnxruntime.NodeInfo;
+import ai.onnxruntime.OnnxTensor;
 import ai.onnxruntime.OrtEnvironment;
+import ai.onnxruntime.OrtException;
 import ai.onnxruntime.OrtSession;
 
 import java.io.IOException;
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.HashMap;
 import java.util.Map;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public final class ModelRunner {
 
-    /*
-     * Both model files MUST exist in the JAR at:
-     *
-     * src/main/resources/newgen6/
-     *
-     * newgen6_full.onnx
-     * newgen6_full.onnx.data
-     */
     private static final String MODEL_PATH =
             "/newgen6/newgen6_full.onnx";
 
     private static final String MODEL_DATA_PATH =
             "/newgen6/newgen6_full.onnx.data";
 
-    /*
-     * Android ARM64 ONNX Runtime native libraries.
-     */
     private static final String NATIVE_DIR =
             "/ai/onnxruntime/native/android-arm64/";
 
@@ -40,43 +32,26 @@ public final class ModelRunner {
     private static final String ORT_JNI_NATIVE =
             NATIVE_DIR + "libonnxruntime4j_jni.so";
 
-    /*
-     * Background loader thread.
-     *
-     * ONNX loading and initialization never happens
-     * on Minecraft's render/tick thread.
-     */
+    private static final int FEATURE_COUNT = 78;
+    private static final int MODEL_FEATURE_COUNT = 156;
+    private static final int HISTORY_LENGTH = 96;
+
     private static final ExecutorService LOADER =
             Executors.newSingleThreadExecutor(r -> {
                 Thread thread =
                         new Thread(r, "NewGen6-ONNX-Loader");
-
                 thread.setDaemon(true);
-
                 return thread;
             });
 
     private static volatile OrtEnvironment environment;
     private static volatile OrtSession session;
 
-    private static volatile boolean loading = false;
-    private static volatile boolean failed = false;
-
-    private static volatile boolean inferenceTestStarted = false;
-    private static volatile boolean inferenceTestFinished = false;
-
-    /*
-     * Directory containing extracted Android native libraries.
-     */
     private static volatile Path nativeDirectory;
-
-    /*
-     * Directory containing:
-     *
-     * newgen6_full.onnx
-     * newgen6_full.onnx.data
-     */
     private static volatile Path modelDirectory;
+
+    private static volatile boolean loading;
+    private static volatile boolean failed;
 
     private ModelRunner() {
     }
@@ -84,20 +59,16 @@ public final class ModelRunner {
     public static synchronized void initializeAsync() {
 
         if (session != null) {
-
             System.out.println(
-                    "NewGen6: ONNX model is already loaded."
+                    "NewGen6: ONNX model already loaded."
             );
-
             return;
         }
 
         if (loading) {
-
             System.out.println(
                     "NewGen6: ONNX model is already loading."
             );
-
             return;
         }
 
@@ -119,41 +90,30 @@ public final class ModelRunner {
         try {
 
             System.out.println("================================");
-
             System.out.println(
                     "NewGen6: Loading ONNX model..."
             );
-
             System.out.println(
                     "Thread: " +
                     Thread.currentThread().getName()
             );
-
             System.out.println("================================");
 
             /*
-             * IMPORTANT:
-             *
-             * Native libraries MUST be prepared before
-             * the first initialization of ONNX Runtime.
+             * Native libraries must be prepared before
+             * ONNX Runtime is initialized.
              */
             prepareAndroidNativeLibraries();
 
             /*
-             * Initialize ONNX Runtime only after the
-             * native libraries have been extracted.
+             * ONNX Runtime environment.
              */
             localEnvironment =
                     OrtEnvironment.getEnvironment();
 
             /*
-             * Extract the ONNX model and its external
-             * data file into the SAME directory.
-             *
-             * This is required because the ONNX file
-             * references:
-             *
-             * newgen6_full.onnx.data
+             * Extract both ONNX files into the same
+             * filesystem directory.
              */
             prepareModelFiles();
 
@@ -167,8 +127,6 @@ public final class ModelRunner {
                             "newgen6_full.onnx.data"
                     );
 
-            System.out.println();
-
             System.out.println(
                     "NewGen6: Model directory: " +
                     modelDirectory
@@ -180,33 +138,29 @@ public final class ModelRunner {
             );
 
             System.out.println(
-                    "NewGen6: Model data file: " +
+                    "NewGen6: External data file: " +
                     modelDataFile
             );
 
             System.out.println(
-                    "NewGen6: Model file size: " +
+                    "NewGen6: Model size: " +
                     Files.size(modelFile) +
                     " bytes"
             );
 
             System.out.println(
-                    "NewGen6: Model external data size: " +
+                    "NewGen6: External data size: " +
                     Files.size(modelDataFile) +
                     " bytes"
             );
 
             /*
-             * Create the session FROM THE FILE PATH.
+             * IMPORTANT:
              *
-             * DO NOT use:
+             * Load from the filesystem path rather than
+             * createSession(byte[]).
              *
-             * createSession(byte[], options)
-             *
-             * because the model uses external tensor data.
-             *
-             * Loading from the file path allows ONNX Runtime
-             * to resolve newgen6_full.onnx.data beside it.
+             * The model uses external tensor data.
              */
             OrtSession.SessionOptions options =
                     new OrtSession.SessionOptions();
@@ -225,7 +179,8 @@ public final class ModelRunner {
             }
 
             /*
-             * Model successfully loaded.
+             * Publish only after the complete session
+             * has successfully loaded.
              */
             environment = localEnvironment;
             session = localSession;
@@ -233,86 +188,44 @@ public final class ModelRunner {
             localEnvironment = null;
             localSession = null;
 
-            System.out.println();
-            System.out.println(
-                    "=== NewGen6 ONNX Model ==="
-            );
-
-            /*
-             * Print inputs.
-             */
-            System.out.println();
-            System.out.println("INPUTS:");
-
-            for (Map.Entry<String, NodeInfo> entry :
-                    session.getInputInfo().entrySet()) {
-
-                System.out.println(
-                        "  " +
-                        entry.getKey() +
-                        " -> " +
-                        entry.getValue().getInfo()
-                );
-            }
-
-            /*
-             * Print outputs.
-             */
-            System.out.println();
-            System.out.println("OUTPUTS:");
-
-            for (Map.Entry<String, NodeInfo> entry :
-                    session.getOutputInfo().entrySet()) {
-
-                System.out.println(
-                        "  " +
-                        entry.getKey() +
-                        " -> " +
-                        entry.getValue().getInfo()
-                );
-            }
+            printModelInterface();
 
             System.out.println();
             System.out.println(
-                    "=========================="
+                    "================================"
             );
-
             System.out.println(
-                    "NewGen6: ONNX MODEL LOADED!"
+                    "NewGen6: ONNX MODEL READY"
             );
-
             System.out.println(
-                    "=========================="
+                    "NewGen6: Expected input: [1,96,156]"
             );
-
-            /*
-             * Perform the diagnostic interface test.
-             */
-            runInferenceTest();
+            System.out.println(
+                    "NewGen6: Features per frame: 78"
+            );
+            System.out.println(
+                    "NewGen6: Model outputs: " +
+                    session.getOutputInfo().size()
+            );
+            System.out.println(
+                    "================================"
+            );
 
         } catch (Throwable e) {
 
             failed = true;
 
             System.err.println();
-
             System.err.println(
                     "NewGen6: FAILED TO LOAD ONNX MODEL"
             );
-
             System.err.println(
                     "NewGen6: Minecraft will NOT be crashed."
             );
 
-            System.err.println();
-
             e.printStackTrace();
 
-            /*
-             * Clean up partially created session.
-             */
             if (localSession != null) {
-
                 try {
                     localSession.close();
                 } catch (Exception ignored) {
@@ -320,18 +233,11 @@ public final class ModelRunner {
             }
 
             /*
-             * Clean up partially created environment.
+             * OrtEnvironment is effectively a JVM-wide
+             * singleton in current ONNX Runtime versions.
              */
-            if (localEnvironment != null) {
-
-                try {
-                    localEnvironment.close();
-                } catch (Exception ignored) {
-                }
-            }
-
-            session = null;
             environment = null;
+            session = null;
 
         } finally {
 
@@ -345,10 +251,196 @@ public final class ModelRunner {
         }
     }
 
-    /**
-     * Extracts the Android ARM64 ONNX Runtime libraries
-     * into a writable temporary directory.
+    private static void printModelInterface()
+            throws OrtException {
+
+        if (session == null) {
+            return;
+        }
+
+        System.out.println();
+        System.out.println(
+                "=== NewGen6 ONNX Model Interface ==="
+        );
+
+        System.out.println();
+        System.out.println("INPUTS:");
+
+        for (Map.Entry<String, NodeInfo> entry :
+                session.getInputInfo().entrySet()) {
+
+            System.out.println(
+                    "  " +
+                    entry.getKey() +
+                    " -> " +
+                    entry.getValue().getInfo()
+            );
+        }
+
+        System.out.println();
+        System.out.println("OUTPUTS:");
+
+        for (Map.Entry<String, NodeInfo> entry :
+                session.getOutputInfo().entrySet()) {
+
+            System.out.println(
+                    "  " +
+                    entry.getKey() +
+                    " -> " +
+                    entry.getValue().getInfo()
+            );
+        }
+
+        System.out.println(
+                "===================================="
+        );
+    }
+
+    /*
+     * Runs one actual model inference.
+     *
+     * The caller supplies the COMPLETE [1,96,156]
+     * tensor contents.
+     *
+     * This method does NOT construct the 78 features.
      */
+    public static synchronized Map<String, float[][]>
+    runInference(float[][][] input)
+            throws OrtException {
+
+        if (session == null) {
+            throw new IllegalStateException(
+                    "NewGen6 ONNX session is not loaded."
+            );
+        }
+
+        validateInputShape(input);
+
+        /*
+         * Convert float[96][156] into a batch of one:
+         *
+         * [1,96,156]
+         */
+        float[][][] batch =
+                new float[1][HISTORY_LENGTH][MODEL_FEATURE_COUNT];
+
+        for (int t = 0; t < HISTORY_LENGTH; t++) {
+            System.arraycopy(
+                    input[t],
+                    0,
+                    batch[0][t],
+                    0,
+                    MODEL_FEATURE_COUNT
+            );
+        }
+
+        String inputName =
+                session.getInputInfo()
+                        .keySet()
+                        .iterator()
+                        .next();
+
+        try (OnnxTensor tensor =
+                     OnnxTensor.createTensor(
+                             environment,
+                             batch
+                     )) {
+
+            Map<String, OnnxTensor> inputs =
+                    new HashMap<>();
+
+            inputs.put(
+                    inputName,
+                    tensor
+            );
+
+            try (OrtSession.Result result =
+                         session.run(inputs)) {
+
+                Map<String, float[][]> outputs =
+                        new HashMap<>();
+
+                for (Map.Entry<String, NodeInfo> entry :
+                        session.getOutputInfo().entrySet()) {
+
+                    String name = entry.getKey();
+
+                    Object value =
+                            result.get(name)
+                                  .orElse(null);
+
+                    if (value instanceof float[][]) {
+
+                        outputs.put(
+                                name,
+                                (float[][]) value
+                        );
+
+                    } else if (value instanceof float[]) {
+
+                        float[] flat =
+                                (float[]) value;
+
+                        outputs.put(
+                                name,
+                                new float[][]{
+                                        flat
+                                }
+                        );
+
+                    } else {
+
+                        throw new OrtException(
+                                "Unexpected output type for " +
+                                name +
+                                ": " +
+                                (value == null
+                                        ? "null"
+                                        : value.getClass()
+                                                .getName())
+                        );
+                    }
+                }
+
+                return outputs;
+            }
+        }
+    }
+
+    private static void validateInputShape(
+            float[][][] input) {
+
+        if (input == null) {
+            throw new IllegalArgumentException(
+                    "Input tensor is null."
+            );
+        }
+
+        if (input.length != HISTORY_LENGTH) {
+            throw new IllegalArgumentException(
+                    "Expected 96 frames, got " +
+                    input.length
+            );
+        }
+
+        for (int t = 0; t < HISTORY_LENGTH; t++) {
+
+            if (input[t] == null) {
+                throw new IllegalArgumentException(
+                        "Frame " + t + " is null."
+                );
+            }
+
+            if (input[t].length != MODEL_FEATURE_COUNT) {
+                throw new IllegalArgumentException(
+                        "Frame " + t +
+                        " expected 156 features, got " +
+                        input[t].length
+                );
+            }
+        }
+    }
+
     private static synchronized void
     prepareAndroidNativeLibraries()
             throws IOException {
@@ -358,11 +450,6 @@ public final class ModelRunner {
             System.setProperty(
                     "onnxruntime.native.path",
                     nativeDirectory.toString()
-            );
-
-            System.out.println(
-                    "NewGen6: Reusing native directory: " +
-                    nativeDirectory
             );
 
             return;
@@ -383,9 +470,6 @@ public final class ModelRunner {
                         "libonnxruntime4j_jni.so"
                 );
 
-        /*
-         * Extract the real ARM64 libraries.
-         */
         extractResource(
                 ORT_NATIVE,
                 ortPath
@@ -397,8 +481,46 @@ public final class ModelRunner {
         );
 
         /*
-         * Tell ONNX Runtime where the libraries are.
+         * These sizes are useful for detecting the exact
+         * problem you previously had where the resources
+         * were only ~100 bytes.
          */
+        long ortSize =
+                Files.size(ortPath);
+
+        long jniSize =
+                Files.size(jniPath);
+
+        System.out.println(
+                "NewGen6: libonnxruntime.so size: " +
+                ortSize +
+                " bytes"
+        );
+
+        System.out.println(
+                "NewGen6: libonnxruntime4j_jni.so size: " +
+                jniSize +
+                " bytes"
+        );
+
+        if (ortSize < 1_000_000) {
+
+            throw new IOException(
+                    "libonnxruntime.so is suspiciously small: " +
+                    ortSize +
+                    " bytes"
+            );
+        }
+
+        if (jniSize < 10_000) {
+
+            throw new IOException(
+                    "libonnxruntime4j_jni.so is suspiciously small: " +
+                    jniSize +
+                    " bytes"
+            );
+        }
+
         System.setProperty(
                 "onnxruntime.native.path",
                 directory.toString()
@@ -410,34 +532,13 @@ public final class ModelRunner {
                 "NewGen6: Android ARM64 native directory: " +
                 directory
         );
-
-        System.out.println(
-                "NewGen6: libonnxruntime.so size: " +
-                Files.size(ortPath) +
-                " bytes"
-        );
-
-        System.out.println(
-                "NewGen6: libonnxruntime4j_jni.so size: " +
-                Files.size(jniPath) +
-                " bytes"
-        );
     }
 
-    /**
-     * Extracts BOTH model files into the same directory.
-     */
     private static synchronized void
     prepareModelFiles()
             throws IOException {
 
         if (modelDirectory != null) {
-
-            System.out.println(
-                    "NewGen6: Reusing model directory: " +
-                    modelDirectory
-            );
-
             return;
         }
 
@@ -456,58 +557,29 @@ public final class ModelRunner {
                         "newgen6_full.onnx.data"
                 );
 
-        /*
-         * Extract the ONNX model.
-         */
         extractResource(
                 MODEL_PATH,
                 modelFile
         );
 
-        /*
-         * Extract the external tensor data.
-         *
-         * This MUST have exactly the filename:
-         *
-         * newgen6_full.onnx.data
-         */
         extractResource(
                 MODEL_DATA_PATH,
                 modelDataFile
         );
 
-        /*
-         * Verify that both files exist.
-         */
-        if (!Files.exists(modelFile)) {
+        if (!Files.exists(modelFile) ||
+                Files.size(modelFile) == 0) {
 
             throw new IOException(
-                    "Extracted ONNX model does not exist: " +
-                    modelFile
+                    "Invalid ONNX model file."
             );
         }
 
-        if (!Files.exists(modelDataFile)) {
+        if (!Files.exists(modelDataFile) ||
+                Files.size(modelDataFile) == 0) {
 
             throw new IOException(
-                    "Extracted ONNX external data does not exist: " +
-                    modelDataFile
-            );
-        }
-
-        if (Files.size(modelFile) <= 0) {
-
-            throw new IOException(
-                    "ONNX model file is empty: " +
-                    modelFile
-            );
-        }
-
-        if (Files.size(modelDataFile) <= 0) {
-
-            throw new IOException(
-                    "ONNX external data file is empty: " +
-                    modelDataFile
+                    "Invalid ONNX external data file."
             );
         }
 
@@ -518,13 +590,10 @@ public final class ModelRunner {
         );
     }
 
-    /**
-     * Extracts a resource from the mod JAR into a file.
-     */
     private static void extractResource(
             String resourcePath,
-            Path destination
-    ) throws IOException {
+            Path destination)
+            throws IOException {
 
         try (InputStream input =
                      ModelRunner.class
@@ -547,132 +616,6 @@ public final class ModelRunner {
         }
     }
 
-    /**
-     * Performs one diagnostic inference/interface test.
-     *
-     * We intentionally do not create a fake tensor.
-     */
-    private static void runInferenceTest() {
-
-        if (session == null) {
-            return;
-        }
-
-        if (inferenceTestStarted) {
-            return;
-        }
-
-        inferenceTestStarted = true;
-
-        System.out.println();
-
-        System.out.println(
-                "================================"
-        );
-
-        System.out.println(
-                "NewGen6: INFERENCE TEST"
-        );
-
-        System.out.println(
-                "================================"
-        );
-
-        try {
-
-            Map<String, NodeInfo> inputs =
-                    session.getInputInfo();
-
-            Map<String, NodeInfo> outputs =
-                    session.getOutputInfo();
-
-            System.out.println(
-                    "NewGen6: Input count = " +
-                    inputs.size()
-            );
-
-            System.out.println(
-                    "NewGen6: Output count = " +
-                    outputs.size()
-            );
-
-            /*
-             * Print input information.
-             */
-            for (Map.Entry<String, NodeInfo> entry :
-                    inputs.entrySet()) {
-
-                System.out.println(
-                        "NewGen6: Input: " +
-                        entry.getKey() +
-                        " -> " +
-                        entry.getValue().getInfo()
-                );
-            }
-
-            /*
-             * Print output information.
-             */
-            for (Map.Entry<String, NodeInfo> entry :
-                    outputs.entrySet()) {
-
-                System.out.println(
-                        "NewGen6: Output: " +
-                        entry.getKey() +
-                        " -> " +
-                        entry.getValue().getInfo()
-                );
-            }
-
-            /*
-             * We intentionally stop here.
-             *
-             * We don't yet know the actual game-state
-             * tensor values that should be supplied.
-             */
-            System.out.println();
-
-            System.out.println(
-                    "NewGen6: Model interface verified."
-            );
-
-            System.out.println(
-                    "NewGen6: Waiting for input schema " +
-                    "before running a real tensor inference."
-            );
-
-            System.out.println(
-                    "NewGen6: Minecraft thread was never blocked."
-            );
-
-            inferenceTestFinished = true;
-
-            System.out.println(
-                    "================================"
-            );
-
-            System.out.println(
-                    "NewGen6: INFERENCE TEST PASSED"
-            );
-
-            System.out.println(
-                    "================================"
-            );
-
-        } catch (Throwable e) {
-
-            System.err.println();
-
-            System.err.println(
-                    "NewGen6: INFERENCE TEST FAILED"
-            );
-
-            e.printStackTrace();
-
-            inferenceTestFinished = true;
-        }
-    }
-
     public static boolean isLoaded() {
         return session != null;
     }
@@ -685,10 +628,6 @@ public final class ModelRunner {
         return failed;
     }
 
-    public static boolean isInferenceTestFinished() {
-        return inferenceTestFinished;
-    }
-
     public static OrtSession getSession() {
         return session;
     }
@@ -697,43 +636,29 @@ public final class ModelRunner {
         return environment;
     }
 
-    /**
-     * Closes ONNX Runtime resources.
-     */
     public static synchronized void close() {
 
         OrtSession currentSession =
                 session;
 
-        OrtEnvironment currentEnvironment =
-                environment;
-
         session = null;
-        environment = null;
 
         if (currentSession != null) {
 
             try {
-
                 currentSession.close();
-
             } catch (Exception e) {
-
                 e.printStackTrace();
             }
         }
 
-        if (currentEnvironment != null) {
-
-            try {
-
-                currentEnvironment.close();
-
-            } catch (Exception e) {
-
-                e.printStackTrace();
-            }
-        }
+        /*
+         * Do not depend on closing OrtEnvironment to
+         * unload native libraries. Current ORT Java
+         * documentation describes the environment as
+         * effectively JVM-wide.
+         */
+        environment = null;
 
         nativeDirectory = null;
         modelDirectory = null;
