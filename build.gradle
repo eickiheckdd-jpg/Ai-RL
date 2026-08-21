@@ -16,14 +16,12 @@ repositories {
 
 dependencies {
     minecraft "com.mojang:minecraft:${minecraft_version}"
-
     mappings "net.fabricmc:yarn:${yarn_mappings}:v2"
 
     modImplementation "net.fabricmc:fabric-loader:${loader_version}"
     modImplementation "net.fabricmc.fabric-api:fabric-api:${fabric_version}"
 
-    // ONNX Runtime Java API
-    implementation "com.microsoft.onnxruntime:onnxruntime:1.29.0"
+    implementation 'com.microsoft.onnxruntime:onnxruntime:1.29.0'
 }
 
 processResources {
@@ -34,12 +32,14 @@ processResources {
     }
 }
 
-tasks.withType(JavaCompile).configureEach {
-    it.options.release = 21
-}
-
 java {
     withSourcesJar()
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+
+tasks.named("sourcesJar") {
+    duplicatesStrategy = DuplicatesStrategy.EXCLUDE
 }
 
 jar {
@@ -53,9 +53,5 @@ publishing {
         create("mavenJava", MavenPublication) {
             from components.java
         }
-    }
-
-    repositories {
-        // Add your Maven repository here if you eventually publish the mod.
     }
 }
