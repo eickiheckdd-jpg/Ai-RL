@@ -2,7 +2,7 @@ package com.example.newgen6.client;
 
 import com.example.newgen6.rl.*;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.event.lifecycle.v1.ClientLifecycleEvents;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.LivingEntity;
