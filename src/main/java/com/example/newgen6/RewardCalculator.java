@@ -20,6 +20,7 @@ public class RewardCalculator {
         float reward = 0.0f;
         float currentPlayerHealth = client.player.getHealth();
 
+        // Health penalties (Player)
         if (currentPlayerHealth < lastPlayerHealth) {
             reward -= (lastPlayerHealth - currentPlayerHealth) * DAMAGE_TAKEN_PENALTY;
         }
@@ -27,6 +28,7 @@ public class RewardCalculator {
             reward -= DEATH_PENALTY;
         }
 
+        // Combat rewards (Target)
         if (target != null) {
             float currentTargetHealth = target.getHealth();
             if (currentTargetHealth < lastTargetHealth) {
@@ -36,15 +38,18 @@ public class RewardCalculator {
                 reward += KILL_REWARD;
             }
             lastTargetHealth = currentTargetHealth;
-            // Reward for keeping pitchDiff near 0
-            reward += (1.0f - Math.abs(aimAlignment)) * AIM_ALIGNMENT_REWARD;
+            
+            // SHIFTED GRADIENT: 
+            // If aimAlignment is 0.0 (perfect), reward is +0.05
+            // If aimAlignment is 1.0 (terrible), reward is -0.05
+            reward += (0.5f - Math.abs(aimAlignment)) * (AIM_ALIGNMENT_REWARD * 2.0f);
         } else {
             lastTargetHealth = 20.0f;
         }
 
         if (wasInvalidAction) reward -= INVALID_ACTION_PENALTY;
         lastPlayerHealth = currentPlayerHealth;
-        
+
         return reward;
     }
 
