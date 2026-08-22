@@ -91,10 +91,14 @@ public class DoubleDQNAgent {
         }
     }
 
-    public synchronized JavaMLP getOnlineNetwork() { return onlineNetwork; }
+        public synchronized JavaMLP getOnlineNetwork() { return onlineNetwork; }
     public float getEpsilon() { return epsilon; }
     public void setEpsilon(float epsilon) { this.epsilon = epsilon; }
     public int getTrainingStepCount() { return trainingStepCount; }
     public int getGameStepCount() { return gameStepCount; }
     public void setTrainingStepCount(int stepCount) { this.trainingStepCount = stepCount; }
+    
+    // Added for ModelSerializer compatibility
+    public int getStepCount() { return trainingStepCount; }
+    public void setStepCount(int stepCount) { this.trainingStepCount = stepCount; }
 }
