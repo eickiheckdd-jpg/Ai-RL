@@ -3,6 +3,7 @@ package com.example.newgen6;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.render.RenderTickCounter;
 
 public class TrainingHudOverlay implements HudRenderCallback {
     private boolean enabled = true;
@@ -21,7 +22,7 @@ public class TrainingHudOverlay implements HudRenderCallback {
     }
 
     @Override
-    public void onHudRender(DrawContext drawContext, float tickDelta) {
+    public void onHudRender(DrawContext drawContext, RenderTickCounter tickCounter) {
         if (!enabled) return;
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.options.hudHidden) return;
@@ -30,12 +31,12 @@ public class TrainingHudOverlay implements HudRenderCallback {
         int y = 10;
         int color = 0xFFFFFFFF;
 
-        drawContext.drawString(client.textRenderer, "=== RL PvP Agent HUD ===", x, y, 0x00FF00, true);
-        drawContext.drawString(client.textRenderer, "Target: " + targetName, x, y + 12, color, true);
-        drawContext.drawString(client.textRenderer, "Epsilon: " + String.format("%.3f", currentEpsilon), x, y + 24, color, true);
-        drawContext.drawString(client.textRenderer, "Last Reward: " + String.format("%.2f", lastReward), x, y + 36, color, true);
-        drawContext.drawString(client.textRenderer, "Action: " + currentActionStr, x, y + 48, color, true);
-        drawContext.drawString(client.textRenderer, "Steps: " + totalSteps, x, y + 60, color, true);
+        drawContext.drawText(client.textRenderer, "=== RL PvP Agent HUD ===", x, y, 0x00FF00, true);
+        drawContext.drawText(client.textRenderer, "Target: " + targetName, x, y + 12, color, true);
+        drawContext.drawText(client.textRenderer, "Epsilon: " + String.format("%.3f", currentEpsilon), x, y + 24, color, true);
+        drawContext.drawText(client.textRenderer, "Last Reward: " + String.format("%.2f", lastReward), x, y + 36, color, true);
+        drawContext.drawText(client.textRenderer, "Action: " + currentActionStr, x, y + 48, color, true);
+        drawContext.drawText(client.textRenderer, "Steps: " + totalSteps, x, y + 60, color, true);
     }
 
     public void toggle() {
