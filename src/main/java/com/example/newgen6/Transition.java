@@ -8,19 +8,14 @@ public class Transition {
     public boolean done;
 
     public Transition(float[] state, int action, float reward, float[] nextState, boolean done) {
-        this.state = state;
-        this.action = action;
-        this.reward = reward;
-        this.nextState = nextState;
-        this.done = done;
+        set(state, action, reward, nextState, done);
     }
 
-    // This is the new method ReplayBuffer needs to prevent lag
     public void set(float[] state, int action, float reward, float[] nextState, boolean done) {
-        this.state = state;
+        this.state = state.clone();
         this.action = action;
         this.reward = reward;
-        this.nextState = nextState;
+        this.nextState = nextState.clone();
         this.done = done;
     }
 }
