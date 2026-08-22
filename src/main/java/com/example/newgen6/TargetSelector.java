@@ -23,13 +23,12 @@ public class TargetSelector {
 
         List<Entity> entities = client.world.getOtherEntities(client.player, client.player.getBoundingBox().expand(MAX_TARGET_DISTANCE));
         for (Entity entity : entities) {
-            if (entity instanceof LivingEntity living && living.isAlive() && entity != client.player) {
-                if (living instanceof PlayerEntity || living.isHostile()) {
-                    double distSq = client.player.squaredDistanceTo(living);
-                    if (distSq < closestDistanceSq) {
-                        closestDistanceSq = distSq;
-                        bestTarget = living;
-                    }
+            // Restricted strictly to PlayerEntity, ensuring it never targets mobs/hostiles
+            if (entity instanceof PlayerEntity player && player.isAlive() && player != client.player) {
+                double distSq = client.player.squaredDistanceTo(player);
+                if (distSq < closestDistanceSq) {
+                    closestDistanceSq = distSq;
+                    bestTarget = player;
                 }
             }
         }
