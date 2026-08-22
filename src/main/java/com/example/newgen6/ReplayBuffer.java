@@ -15,7 +15,13 @@ public class ReplayBuffer {
     }
 
     public synchronized void add(float[] state, int action, float reward, float[] nextState, boolean done) {
-        buffer[head] = new Transition(state, action, reward, nextState, done);
+        // Reuse existing objects to prevent memory leaks and GC lag
+        if (buffer[head] == null) {
+            buffer[head] = new Transition(state, action, reward, nextState, done);
+        } else {
+            buffer[head].set(state, action, reward, nextState, done);
+        }
+        
         head = (head + 1) % capacity;
         if (size < capacity) size++;
     }
