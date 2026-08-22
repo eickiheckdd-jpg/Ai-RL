@@ -10,8 +10,6 @@ import net.minecraft.client.option.KeyBinding;
 import net.minecraft.util.Identifier;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.ItemStack;
-import net.minecraft.item.Items;
 
 import org.lwjgl.glfw.GLFW;
 
@@ -19,11 +17,10 @@ import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
+import java.util.function.Consumer;
 
 /**
- * Newgen6 - Fixed strictly On-Policy REINFORCE Agent.
- *
- * C = master toggle.
+ * Newgen6 - Fully Soft-Coded Dynamic RL Engine (Chunk 1).
  */
 public final class Newgen6Client implements ClientModInitializer {
 
@@ -34,36 +31,34 @@ public final class Newgen6Client implements ClientModInitializer {
                     Identifier.of("newgen6", "general")
             );
 
-    private static final boolean ENABLE_AI_CONTROL_AFTER_TRAINING = true;
-
     private static Path DATA_DIR;
     private static Path MODEL_FILE;
     private static KeyBinding MASTER_KEY;
 
     private static boolean enabled = false;
-    private static boolean training = false;
     private static boolean aiEnabled = false;
 
     private static final int FRAME_INPUTS = 19;
-    private static final int HISTORY_FRAMES = 50; // 5 seconds at 10 Hz
+    private static final int HISTORY_FRAMES = 50; 
     private static final int INPUTS = FRAME_INPUTS * HISTORY_FRAMES;
-    private static final int ACTIONS = 20;
-
-    private static final float[] AIM_YAW = {-4f, 4f, 0f, 0f, -3f, 3f};
-    private static final float[] AIM_PITCH = {0f, 0f, -3f, 3f, -2f, -2f};
+    
+    private static final List<AIAction> ACTION_REGISTRY = new ArrayList<>();
+    private static final int RESERVED_FUTURE_SLOTS = 10;
 
     private static final Random RANDOM = new Random();
+    private static NeuralPolicy POLICY;
 
-    private static final NeuralPolicy POLICY =
-            new NeuralPolicy(INPUTS, 64, 64, ACTIONS);
-
-    private static final double LEARNING_RATE = 0.00015;
+    private static final double LEARNING_RATE = 0.001;
+    private static final double GAMMA = 0.99;
+    private static final double ENTROPY_BETA = 0.01;
 
     private static final double[] HISTORY = new double[INPUTS];
-    private static int historyTick;
+    private static boolean historyInitialized = false;
 
     private static Observation previousObservation;
     private static int previousAction = -1;
+    private static double accumulatedReturn = 0.0;
+    private static double gammaMultiplier = 1.0;
 
     @Override
     public void onInitializeClient() {
@@ -78,6 +73,11 @@ public final class Newgen6Client implements ClientModInitializer {
             e.printStackTrace();
         }
 
+        registerBaseActions();
+
+        int totalActions = ACTION_REGISTRY.size() + RESERVED_FUTURE_SLOTS;
+        POLICY = new NeuralPolicy(INPUTS, 64, 64, totalActions);
+
         loadModel();
 
         MASTER_KEY = KeyBindingHelper.registerKeyBinding(
@@ -90,9 +90,35 @@ public final class Newgen6Client implements ClientModInitializer {
 
         ClientTickEvents.END_CLIENT_TICK.register(Newgen6Client::tick);
 
-        System.out.println("[Newgen6] Loaded (Strict On-Policy Mode).");
+        System.out.println("[Newgen6] Loaded with " + ACTION_REGISTRY.size() + " active actions (" + totalActions + " total pooled slots).");
     }
 
+    private static void registerBaseActions() {
+        float[] yawSteps = {-4f, 4f, 0f, 0f, -2f, 2f, -1f, 1f};
+        float[] pitchSteps = {0f, 0f, -3f, 3f, -1.5f, 1.5f, -0.5f, 0.5f};
+
+        for (int i = 0; i < yawSteps.length; i++) {
+            final float dy = yawSteps[i];
+            final float dp = pitchSteps[i];
+            ACTION_REGISTRY.add(new AIAction("Aim_" + i, client -> {
+                if (client.player != null) {
+                    client.player.setYaw(client.player.getYaw() + dy);
+                    client.player.setPitch(clampPitch(client.player.getPitch() + dp));
+                }
+            }));
+        }
+
+        ACTION_REGISTRY.add(new AIAction("Attack", client -> {
+            if (client.interactionManager != null && client.player != null) {
+                if (client.targetedEntity instanceof PlayerEntity target) {
+                    if (client.player.getAttackCooldownProgress(0.5f) >= 0.9f) {
+                        client.interactionManager.attackEntity(client.player, target);
+                        client.player.swingHand(net.minecraft.util.Hand.MAIN_HAND);
+                    }
+                }
+            }
+        }));
+    }
     private static void tick(MinecraftClient client) {
         if (client.player == null || client.world == null) {
             return;
@@ -100,16 +126,17 @@ public final class Newgen6Client implements ClientModInitializer {
 
         while (MASTER_KEY.wasPressed()) {
             enabled = !enabled;
-            training = enabled;
-            aiEnabled = enabled; // Forces AI control when enabled
+            aiEnabled = enabled;
 
             if (enabled) {
                 previousObservation = null;
                 previousAction = -1;
+                accumulatedReturn = 0.0;
+                gammaMultiplier = 1.0;
                 Arrays.fill(HISTORY, 0.0);
-                historyTick = 0;
+                historyInitialized = false;
 
-                System.out.println("[Newgen6] ENABLED - AI taking control");
+                System.out.println("[Newgen6] ENABLED - AI Control Active");
             } else {
                 System.out.println("[Newgen6] DISABLED");
                 releaseInputs(client);
@@ -126,6 +153,13 @@ public final class Newgen6Client implements ClientModInitializer {
         Observation frame = observe(client.player);
         if (frame == null) {
             return;
+        }
+
+        if (!historyInitialized) {
+            for (int i = 0; i < HISTORY_FRAMES; i++) {
+                System.arraycopy(frame.values, 0, HISTORY, i * FRAME_INPUTS, FRAME_INPUTS);
+            }
+            historyInitialized = true;
         }
 
         if ((client.player.age & 1) != 0) {
@@ -206,30 +240,31 @@ public final class Newgen6Client implements ClientModInitializer {
         if (player == null) return;
 
         double[] state = observation.values.clone();
-
-        // Let the Softmax distribution handle exploration naturally.
         int action = POLICY.chooseAction(state, 1.0);
 
-        applyAction(client, action);
-        if (action >= 14) {
-            applyAimAction(client, action - 14);
+        if (action < ACTION_REGISTRY.size()) {
+            ACTION_REGISTRY.get(action).executor.accept(client);
+        } else {
+            ACTION_REGISTRY.get(0).executor.accept(client);
         }
 
         Observation frame = observe(client.player);
         if (frame == null) return;
         
-        // Push the new result to history to create the "next state"
         pushHistory(frame.values);
         Observation nextState = new Observation(HISTORY);
 
+        double reward = calculateUnifiedReward(previousObservation, nextState, action);
+
         if (previousObservation != null) {
-            // Compare previous full history to new full history
-            double reward = calculateUnifiedReward(previousObservation, nextState);
-            POLICY.train(previousObservation.values, previousAction, reward, LEARNING_RATE);
+            accumulatedReturn += gammaMultiplier * reward;
+            gammaMultiplier *= GAMMA;
+
+            POLICY.train(previousObservation.values, previousAction, accumulatedReturn, LEARNING_RATE);
             
             if (player.age % 20 == 0) {
-                System.out.println("[Newgen6] AI Action: " + action + 
-                                   " | Reward: " + String.format(java.util.Locale.ROOT, "%.4f", reward));
+                System.out.println("[Newgen6] Action ID: " + action + 
+                                   " | Return: " + String.format(java.util.Locale.ROOT, "%.4f", accumulatedReturn));
             }
         }
 
@@ -237,7 +272,8 @@ public final class Newgen6Client implements ClientModInitializer {
         previousAction = action;
     }
 
-    private static double calculateUnifiedReward(Observation oldState, Observation newState) {
+    private static double calculateUnifiedReward(Observation oldState, Observation newState, int action) {
+        if (oldState == null) return 0.0;
         final int last = INPUTS - FRAME_INPUTS;
 
         double oldPlayerHP = oldState.values[last + 10];
@@ -245,16 +281,11 @@ public final class Newgen6Client implements ClientModInitializer {
         double oldEnemyHP = oldState.values[last + 11];
         double newEnemyHP = newState.values[last + 11];
 
-        double damageDealt = oldEnemyHP - newEnemyHP;
-        double damageTaken = oldPlayerHP - newPlayerHP;
+        double damageDealt = Math.max(0.0, oldEnemyHP - newEnemyHP);
+        double damageTaken = Math.max(0.0, oldPlayerHP - newPlayerHP);
 
-        double reward = (damageDealt * 20.0) - (damageTaken * 25.0);
+        double reward = (damageDealt * 30.0) - (damageTaken * 35.0);
 
-        // Distance reward
-        double distance = newState.values[last] * 8.0;
-        if (distance >= 2.0 && distance <= 4.0) reward += 0.02;
-
-        // Aim reward (indexing the most recent frame in history)
         double beforeYaw = oldState.values[last + 12] * 180.0;
         double beforePitch = oldState.values[last + 13] * 90.0;
         double afterYaw = newState.values[last + 12] * 180.0;
@@ -263,70 +294,32 @@ public final class Newgen6Client implements ClientModInitializer {
         double beforeError = Math.hypot(beforeYaw, beforePitch);
         double afterError = Math.hypot(afterYaw, afterPitch);
 
-        reward += (beforeError - afterError) / 30.0;
-        if (afterError < 15.0) reward += 0.02;
+        reward += (beforeError - afterError) / 15.0;
 
-        if (newPlayerHP <= 0.001) reward -= 100.0;
-        if (newEnemyHP <= 0.001) reward += 100.0;
-
-        // Small living/time penalty to force action
-        reward -= 0.001;
-        return Math.max(-100.0, Math.min(100.0, reward));
-    }
-
-    private static void applyAction(MinecraftClient client, int action) {
-        releaseMovement(client);
-        switch (action) {
-            case 1 -> client.options.forwardKey.setPressed(true);
-            case 2 -> client.options.backKey.setPressed(true);
-            case 3 -> client.options.leftKey.setPressed(true);
-            case 4 -> client.options.rightKey.setPressed(true);
-            case 5 -> { client.options.forwardKey.setPressed(true); client.options.leftKey.setPressed(true); }
-            case 6 -> { client.options.forwardKey.setPressed(true); client.options.rightKey.setPressed(true); }
-            case 7 -> { client.options.backKey.setPressed(true); client.options.leftKey.setPressed(true); }
-            case 8 -> { client.options.backKey.setPressed(true); client.options.rightKey.setPressed(true); }
-            case 9 -> attack(client);
-            case 10 -> { client.options.forwardKey.setPressed(true); attack(client); }
-            case 11 -> { client.options.leftKey.setPressed(true); attack(client); }
-            case 12 -> { client.options.rightKey.setPressed(true); attack(client); }
-            case 13 -> client.options.jumpKey.setPressed(true);
+        if (afterError < 4.0) {
+            reward += 0.3;
         }
-    }
 
-    private static void applyAimAction(MinecraftClient client, int aimAction) {
-        if (client.player == null || aimAction < 0 || aimAction >= AIM_YAW.length) return;
-        client.player.setYaw(client.player.getYaw() + AIM_YAW[aimAction]);
-        client.player.setPitch(clampPitch(client.player.getPitch() + AIM_PITCH[aimAction]));
-    }
-
-    private static float clampPitch(float pitch) { return Math.max(-90.0f, Math.min(90.0f, pitch)); }
-
-    private static void attack(MinecraftClient client) {
-        if (client.interactionManager == null || client.player == null) return;
-        if (client.targetedEntity instanceof PlayerEntity target) {
-            client.interactionManager.attackEntity(client.player, target);
-            client.player.swingHand(net.minecraft.util.Hand.MAIN_HAND);
+        if (action == ACTION_REGISTRY.size() - 1 && oldState.values[last + 14] < 0.9f) {
+            reward -= 0.2;
         }
+
+        return Math.max(-50.0, Math.min(50.0, reward));
+    }
+    private static float clampPitch(float pitch) { 
+        return Math.max(-90.0f, Math.min(90.0f, pitch)); 
     }
 
     private static void pushHistory(double[] frame) {
         System.arraycopy(HISTORY, FRAME_INPUTS, HISTORY, 0, INPUTS - FRAME_INPUTS);
         System.arraycopy(frame, 0, HISTORY, INPUTS - FRAME_INPUTS, FRAME_INPUTS);
-        historyTick++;
-    }
-
-    private static void releaseMovement(MinecraftClient client) {
-        client.options.forwardKey.setPressed(false);
-        client.options.backKey.setPressed(false);
-        client.options.leftKey.setPressed(false);
-        client.options.rightKey.setPressed(false);
-        client.options.jumpKey.setPressed(false);
     }
 
     private static void releaseInputs(MinecraftClient client) {
-        releaseMovement(client);
         client.options.attackKey.setPressed(false);
     }
+
+    private record AIAction(String name, Consumer<MinecraftClient> executor) {}
 
     private static final class NeuralPolicy {
         private final int input;
@@ -337,13 +330,24 @@ public final class Newgen6Client implements ClientModInitializer {
         private final double[][] w1, w2, w3;
         private final double[] b1, b2, b3;
 
-        // Advantage Baseline 
-        private double averageReward = 0.0;
+        private final double[][] mw1, mw2, mw3;
+        private final double[][] vw1, vw2, vw3;
+        private final double[] mb1, mb2, mb3;
+        private final double[] vb1, vb2, vb3;
+        private int adamStep = 0;
+
+        private double averageReturn = 0.0;
 
         NeuralPolicy(int input, int hidden1, int hidden2, int output) {
             this.input = input; this.hidden1 = hidden1; this.hidden2 = hidden2; this.output = output;
             w1 = new double[input][hidden1]; w2 = new double[hidden1][hidden2]; w3 = new double[hidden2][output];
             b1 = new double[hidden1]; b2 = new double[hidden2]; b3 = new double[output];
+
+            mw1 = new double[input][hidden1]; mw2 = new double[hidden1][hidden2]; mw3 = new double[hidden2][output];
+            vw1 = new double[input][hidden1]; vw2 = new double[hidden1][hidden2]; vw3 = new double[hidden2][output];
+            mb1 = new double[hidden1]; mb2 = new double[hidden2]; mb3 = new double[output];
+            vb1 = new double[hidden1]; vb2 = new double[hidden2]; vb3 = new double[output];
+
             initialize();
         }
 
@@ -395,26 +399,31 @@ public final class Newgen6Client implements ClientModInitializer {
             return probabilities.length - 1;
         }
 
-        private void train(double[] x, int action, double reward, double lr) {
+        private void train(double[] x, int action, double returnVal, double lr) {
+            adamStep++;
             Forward f = forward(x);
             double[] probabilities = softmax(f.logits, 1.0);
             double[] dLogits = new double[output];
 
-            // Update moving baseline and calculate advantage
-            averageReward = (averageReward * 0.99) + (reward * 0.01);
-            double advantage = reward - averageReward;
+            averageReturn = (averageReturn * 0.99) + (returnVal * 0.01);
+            double advantage = returnVal - averageReturn;
 
             for (int i = 0; i < output; i++) {
-                dLogits[i] = -probabilities[i] * advantage;
+                double entropyGrad = ENTROPY_BETA * probabilities[i] * (Math.log(probabilities[i] + 1e-8));
+                dLogits[i] = (-probabilities[i] * advantage) + entropyGrad;
             }
             dLogits[action] += advantage;
 
+            double[][] dw3 = new double[hidden2][output];
+            double[] db3 = new double[output];
             for (int i = 0; i < hidden2; i++) {
                 for (int j = 0; j < output; j++) {
-                    w3[i][j] += lr * dLogits[j] * f.h2[i];
+                    dw3[i][j] = dLogits[j] * f.h2[i];
                 }
             }
-            for (int j = 0; j < output; j++) b3[j] += lr * dLogits[j];
+            System.arraycopy(dLogits, 0, db3, 0, output);
+            updateAdamMatrix(w3, mw3, vw3, dw3, lr);
+            updateAdamArray(b3, mb3, vb3, db3, lr);
 
             double[] dh2 = new double[hidden2];
             for (int i = 0; i < hidden2; i++) {
@@ -423,6 +432,17 @@ public final class Newgen6Client implements ClientModInitializer {
                 dh2[i] = (f.h2[i] > 0.0) ? sum : 0.0;
             }
 
+            double[][] dw2 = new double[hidden1][hidden2];
+            double[] db2 = new double[hidden2];
+            for (int i = 0; i < hidden1; i++) {
+                for (int j = 0; j < hidden2; j++) {
+                    dw2[i][j] = dh2[j] * f.h1[i];
+                }
+            }
+            System.arraycopy(dh2, 0, db2, 0, hidden2);
+            updateAdamMatrix(w2, mw2, vw2, dw2, lr);
+            updateAdamArray(b2, mb2, vb2, db2, lr);
+
             double[] dh1 = new double[hidden1];
             for (int i = 0; i < hidden1; i++) {
                 double sum = 0.0;
@@ -430,15 +450,44 @@ public final class Newgen6Client implements ClientModInitializer {
                 dh1[i] = (f.h1[i] > 0.0) ? sum : 0.0;
             }
 
-            for (int i = 0; i < hidden1; i++) {
-                for (int j = 0; j < hidden2; j++) w2[i][j] += lr * dh2[j] * f.h1[i];
-            }
-            for (int j = 0; j < hidden2; j++) b2[j] += lr * dh2[j];
-
+            double[][] dw1 = new double[input][hidden1];
+            double[] db1 = new double[hidden1];
             for (int i = 0; i < input; i++) {
-                for (int j = 0; j < hidden1; j++) w1[i][j] += lr * dh1[j] * x[i];
+                for (int j = 0; j < hidden1; j++) {
+                    dw1[i][j] = dh1[j] * x[i];
+                }
             }
-            for (int j = 0; j < hidden1; j++) b1[j] += lr * dh1[j];
+            System.arraycopy(dh1, 0, db1, 0, hidden1);
+            updateAdamMatrix(w1, mw1, vw1, dw1, lr);
+            updateAdamArray(b1, mb1, vb1, db1, lr);
+        }
+
+        private void updateAdamMatrix(double[][] w, double[][] m, double[][] v, double[][] grad, double lr) {
+            double beta1 = 0.9;
+            double beta2 = 0.999;
+            double eps = 1e-8;
+            for (int i = 0; i < w.length; i++) {
+                for (int j = 0; j < w[i].length; j++) {
+                    m[i][j] = beta1 * m[i][j] + (1.0 - beta1) * grad[i][j];
+                    v[i][j] = beta2 * v[i][j] + (1.0 - beta2) * grad[i][j] * grad[i][j];
+                    double mHat = m[i][j] / (1.0 - Math.pow(beta1, adamStep));
+                    double vHat = v[i][j] / (1.0 - Math.pow(beta2, adamStep));
+                    w[i][j] -= lr * mHat / (Math.sqrt(vHat) + eps);
+                }
+            }
+        }
+
+        private void updateAdamArray(double[] w, double[] m, double[] v, double[] grad, double lr) {
+            double beta1 = 0.9;
+            double beta2 = 0.999;
+            double eps = 1e-8;
+            for (int i = 0; i < w.length; i++) {
+                m[i] = beta1 * m[i] + (1.0 - beta1) * grad[i];
+                v[i] = beta2 * v[i] + (1.0 - beta2) * grad[i] * grad[i];
+                double mHat = m[i] / (1.0 - Math.pow(beta1, adamStep));
+                double vHat = v[i] / (1.0 - Math.pow(beta2, adamStep));
+                w[i] -= lr * mHat / (Math.sqrt(vHat) + eps);
+            }
         }
 
         private double[] softmax(double[] logits, double temperature) {
