@@ -33,10 +33,16 @@ import java.util.*;
  * Set ENABLE_AI_CONTROL_AFTER_TRAINING to true if you want C to hand
  * control to the learned policy immediately.
  */
-public class Newgen6Client implements ClientModInitializer {
+public final class Newgen6Client implements ClientModInitializer {
 
     private static final String MOD_ID = "newgen6";
 
+    private static final KeyBinding.Category NEWGEN6_CATEGORY =
+            KeyBinding.Category.create(
+                    Identifier.of("newgen6", "general")
+            );
+
+    private static KeyBinding recordKey;
     /*
      * Change this to true only when you want C to enable AI control too.
      * Default false = C records + trains from your gameplay.
