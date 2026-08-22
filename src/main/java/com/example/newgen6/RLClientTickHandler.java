@@ -9,6 +9,7 @@ import org.lwjgl.glfw.GLFW;
 import java.io.File;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class RLClientTickHandler implements ClientTickEvents.EndTick {
     private final DoubleDQNAgent agent;
@@ -16,8 +17,9 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
     private final RewardCalculator rewardCalculator = new RewardCalculator();
     private final TrainingHudOverlay hudOverlay;
     
-    // Dedicated single-thread executor for neural network backpropagation
+    // Dedicated executor and non-blocking lock to prevent queue stacking
     private final ExecutorService trainingExecutor = Executors.newSingleThreadExecutor();
+    private final AtomicBoolean isTraining = new AtomicBoolean(false);
     
     private float[] previousState = null;
     private int previousAction = 0;
@@ -64,21 +66,25 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
             float reward = rewardCalculator.calculateReward(client, target, false, aimAlignment);
             boolean done = client.player.isDead() || (target != null && target.isDead());
             
-            if (!evaluationMode) {
-                // Copy arrays to prevent race conditions during async processing
-                final float[] pState = previousState.clone();
-                final float[] cState = currentState.clone();
-                final int pAction = previousAction;
-                final float r = reward;
-                final boolean d = done;
-
-                // Offload training step off the main client thread
-                trainingExecutor.submit(() -> {
-                    agent.step(pState, pAction, r, cState, d);
-                });
+            // Log environment step immediately on main thread
+            agent.addExperience(previousState, previousAction, reward, currentState, done);
+            
+            if (!evaluationMode && tickCounter % 5 == 0) {
+                // If previous batch is still processing, skip this one to preserve FPS
+                if (isTraining.compareAndSet(false, true)) {
+                    trainingExecutor.submit(() -> {
+                        try {
+                            agent.trainBatch();
+                        } finally {
+                            isTraining.set(false); // Release lock for next batch
+                        }
+                    });
+                }
             }
 
-            hudOverlay.updateStats(agent.getEpsilon(), reward, CombatAction.values()[previousAction].name(), agent.getStepCount(), target != null ? target.getName().getString() : "None");
+            // Display actual environment ticks vs. backprop cycles
+            String stepStats = "E: " + agent.getGameStepCount() + " | T: " + agent.getTrainingStepCount();
+            hudOverlay.updateStats(agent.getEpsilon(), reward, CombatAction.values()[previousAction].name(), agent.getTrainingStepCount(), target != null ? target.getName().getString() : "None");
 
             if (done) {
                 previousState = null;
@@ -97,6 +103,8 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
         previousAction = actionIndex;
 
         tickCounter++;
+        
+        // Save dynamically via executor to prevent main thread hitches
         if (tickCounter % 1000 == 0 && !evaluationMode) {
             trainingExecutor.submit(() -> ModelSerializer.saveAgent(agent, modelFile));
         }
@@ -106,7 +114,6 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
         this.evaluationMode = eval;
     }
 
-    // Call this when Minecraft shuts down to prevent memory leaks
     public void shutdown() {
         trainingExecutor.shutdown();
     }
