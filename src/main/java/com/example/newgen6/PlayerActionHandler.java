@@ -4,17 +4,20 @@ import com.example.newgen6.rl.BotAction;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
+import net.minecraft.util.PlayerInput;
 
 /**
  * Translates a BotAction into real input on the local player — the same
  * effect as if the player pressed the corresponding keys/clicked. This
- * does NOT spoof packets directly; it drives the same input/interaction
- * paths vanilla input handling uses, so server-side anti-cheat sees normal
- * player movement.
+ * does NOT spoof packets directly; it drives the same input path vanilla
+ * keyboard input feeds into, so server-side anti-cheat sees normal player
+ * movement.
  *
- * NOTE: player.input field names (movementForward/movementSideways/jumping)
- * and InteractionManager#attackEntity are Yarn conventions that may have
- * shifted slightly by 1.21.11 — verify against your decompiled sources.
+ * NOTE: as of the 1.21.9 input rework, Input no longer exposes
+ * movementForward/movementSideways/jumping directly — instead you assign a
+ * whole PlayerInput record (forward/backward/left/right/jump/sneak/sprint)
+ * to player.input.playerInput each tick. This replaces the previous
+ * (pre-1.21.9) field-based approach.
  */
 public class PlayerActionHandler {
 
@@ -24,24 +27,24 @@ public class PlayerActionHandler {
         ClientPlayerEntity player = client.player;
         if (player == null) return;
 
-        // Reset per-tick movement input before applying the new action —
-        // otherwise input state would stick from the previous tick.
-        player.input.movementForward = 0.0f;
-        player.input.movementSideways = 0.0f;
-        player.input.jumping = false;
+        boolean forward = false, backward = false, left = false, right = false, jump = false;
 
         switch (action) {
-            case MOVE_FORWARD -> player.input.movementForward = 1.0f;
-            case MOVE_BACK -> player.input.movementForward = -1.0f;
-            case STRAFE_LEFT -> player.input.movementSideways = 1.0f;
-            case STRAFE_RIGHT -> player.input.movementSideways = -1.0f;
-            case JUMP -> player.input.jumping = true;
+            case MOVE_FORWARD -> forward = true;
+            case MOVE_BACK -> backward = true;
+            case STRAFE_LEFT -> left = true;
+            case STRAFE_RIGHT -> right = true;
+            case JUMP -> jump = true;
             case ATTACK -> attack(client, player, target);
             case BLOCK -> { /* raise shield — wire to your item-use logic if using a shield item */ }
             case LOOK_LEFT -> player.setYaw(player.getYaw() - TURN_SPEED_DEG);
             case LOOK_RIGHT -> player.setYaw(player.getYaw() + TURN_SPEED_DEG);
             case NO_OP -> { /* nothing */ }
         }
+
+        // sneak/sprint left false — extend the action space later if you want the
+        // bot to control those independently.
+        player.input.playerInput = new PlayerInput(forward, backward, left, right, jump, false, false);
     }
 
     /** Optional: smoothly turn toward a target rather than snapping — call instead of raw LOOK actions if desired. */
