@@ -6,16 +6,16 @@ public class DoubleDQNAgent {
     private final JavaMLP onlineNetwork;
     private final JavaMLP targetNetwork;
     private final ReplayBuffer replayBuffer;
-    
+
     private final int actionCount;
     private final float gamma = 0.99f;
     private float epsilon = 1.0f;
     private final float epsilonMin = 0.05f;
     private final float epsilonDecay = 0.9995f; // Faster decay so it learns to aim sooner
-    private final int batchSize = 16;           // Dropped from 64 to 16 to fix CPU lag
+    private final int batchSize = 16;           // Reduced so it doesn't lag your CPU
     private final int targetUpdateFrequency = 1000;
-    private final int warmupSize = 200;         // Starts training much earlier than 1000
-    
+    private final int warmupSize = 200;         // Starts training much earlier
+
     private int trainingStepCount = 0;
     private int gameStepCount = 0;
     private final Random random = new Random();
@@ -28,11 +28,12 @@ public class DoubleDQNAgent {
         this.replayBuffer = new ReplayBuffer(100000);
     }
 
+    // Synchronized blocks main thread briefly to prevent reading corrupted weights mid-update
     public synchronized int selectAction(float[] state, boolean evaluationMode) {
         if (!evaluationMode && random.nextFloat() < epsilon) {
             return random.nextInt(actionCount);
         }
-        
+
         float[] qValues = onlineNetwork.forward(state);
         int bestAction = 0;
         float maxQ = -Float.MAX_VALUE;
@@ -45,22 +46,22 @@ public class DoubleDQNAgent {
         return bestAction;
     }
 
-    // Instantly logs environment step on main thread (zero overhead)
+    // Instantly pushes to buffer on the main thread (zero lag)
     public void addExperience(float[] state, int action, float reward, float[] nextState, boolean done) {
         replayBuffer.add(state, action, reward, nextState, done);
         gameStepCount++;
     }
 
-    // Runs safely on the background thread
+    // Runs on background thread
     public synchronized void trainBatch() {
         if (replayBuffer.size() < warmupSize) return;
 
         Transition[] batch = replayBuffer.sample(batchSize);
-        
+
         for (Transition t : batch) {
             float[] qOnline = onlineNetwork.forward(t.state).clone();
             float targetQ = t.reward;
-            
+
             if (!t.done) {
                 float[] nextQOnline = onlineNetwork.forward(t.nextState);
                 int bestNextAction = 0;
@@ -71,11 +72,11 @@ public class DoubleDQNAgent {
                         bestNextAction = i;
                     }
                 }
-                
+
                 float[] nextQTarget = targetNetwork.forward(t.nextState);
                 targetQ += gamma * nextQTarget[bestNextAction];
             }
-            
+
             qOnline[t.action] = targetQ;
             onlineNetwork.trainStep(t.state, qOnline, 1.0f);
         }
