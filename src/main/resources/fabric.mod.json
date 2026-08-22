@@ -4,13 +4,14 @@
   "version": "${version}",
   "name": "NewGen6 AI",
   "description": "NewGen6 Transformer client AI for Pojav/Fabric.",
-  "authors": ["NewGen6"],
+  "authors": [
+    "NewGen6"
+  ],
   "environment": "client",
   "entrypoints": {
-  "client": [
-    "com.example.newgen6.Newgen6Client"
-  ]
-}
+    "client": [
+      "com.example.newgen6.Newgen6Client"
+    ]
   },
   "depends": {
     "fabricloader": ">=0.18.0",
