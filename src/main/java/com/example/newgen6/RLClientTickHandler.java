@@ -65,6 +65,7 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
         if (previousState != null) {
             CombatAction prevAct = CombatAction.values()[previousAction];
             boolean wasInvalid = false;
+            boolean wasUnnecessaryJump = false;
 
             // Flag attack inputs executed without looking at an entity target as invalid
             if (prevAct == CombatAction.ATTACK_SPAM || prevAct == CombatAction.ATTACK_TIMED_SWEEP || prevAct == CombatAction.ATTACK_SPRINT) {
@@ -73,7 +74,12 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
                 }
             }
 
-            float reward = rewardCalculator.calculateReward(client, target, wasInvalid, aimAlignment);
+            // Penalize jumping if crosshair is not aligned or target is distant/missing
+            if (prevAct == CombatAction.JUMP && (target == null || aimAlignment > 0.3f)) {
+                wasUnnecessaryJump = true;
+            }
+
+            float reward = rewardCalculator.calculateReward(client, target, wasInvalid, wasUnnecessaryJump, aimAlignment);
             boolean done = client.player.isDead() || (target != null && target.isDead());
 
             agent.addExperience(previousState, previousAction, reward, currentState, done);
