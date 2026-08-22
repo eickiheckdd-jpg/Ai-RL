@@ -35,18 +35,15 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
     public void onEndTick(MinecraftClient client) {
         if (client.player == null || client.world == null || client.isPaused()) return;
 
-        long window = client.getWindow().getHandle();
-
-        // Toggle Bot with 'C' key
-        boolean cPressed = InputUtil.isKeyPressed(window, GLFW.GLFW_KEY_C);
+        // Pass client.getWindow() directly for 1.21.11 compatibility
+        boolean cPressed = InputUtil.isKeyPressed(client.getWindow(), GLFW.GLFW_KEY_C);
         if (cPressed && !cKeyWasPressed) {
             botEnabled = !botEnabled;
             System.out.println("[Newgen6] Bot Active: " + botEnabled);
         }
         cKeyWasPressed = cPressed;
 
-        // Toggle HUD with 'X' key
-        boolean xPressed = InputUtil.isKeyPressed(window, GLFW.GLFW_KEY_X);
+        boolean xPressed = InputUtil.isKeyPressed(client.getWindow(), GLFW.GLFW_KEY_X);
         if (xPressed && !xKeyWasPressed) {
             hudOverlay.toggle();
         }
