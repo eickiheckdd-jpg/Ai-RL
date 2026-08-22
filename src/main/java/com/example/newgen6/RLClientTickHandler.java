@@ -5,7 +5,10 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.LivingEntity;
 import org.lwjgl.glfw.GLFW;
+
 import java.io.File;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class RLClientTickHandler implements ClientTickEvents.EndTick {
     private final DoubleDQNAgent agent;
@@ -13,10 +16,13 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
     private final RewardCalculator rewardCalculator = new RewardCalculator();
     private final TrainingHudOverlay hudOverlay;
     
+    // Dedicated single-thread executor for neural network backpropagation
+    private final ExecutorService trainingExecutor = Executors.newSingleThreadExecutor();
+    
     private float[] previousState = null;
     private int previousAction = 0;
     private boolean evaluationMode = false;
-    private boolean botEnabled = true; // Controlled by 'C' key
+    private boolean botEnabled = true;
     private int tickCounter = 0;
     private final File modelFile;
     
@@ -35,7 +41,6 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
     public void onEndTick(MinecraftClient client) {
         if (client.player == null || client.world == null || client.isPaused()) return;
 
-        // Pass client.getWindow() directly for 1.21.11 compatibility
         boolean cPressed = InputUtil.isKeyPressed(client.getWindow(), GLFW.GLFW_KEY_C);
         if (cPressed && !cKeyWasPressed) {
             botEnabled = !botEnabled;
@@ -60,10 +65,17 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
             boolean done = client.player.isDead() || (target != null && target.isDead());
             
             if (!evaluationMode) {
-                // Throttle training to every 5 ticks to prevent main-thread freezing
-                if (tickCounter % 5 == 0) {
-                    agent.step(previousState, previousAction, reward, currentState, done);
-                }
+                // Copy arrays to prevent race conditions during async processing
+                final float[] pState = previousState.clone();
+                final float[] cState = currentState.clone();
+                final int pAction = previousAction;
+                final float r = reward;
+                final boolean d = done;
+
+                // Offload training step off the main client thread
+                trainingExecutor.submit(() -> {
+                    agent.step(pState, pAction, r, cState, d);
+                });
             }
 
             hudOverlay.updateStats(agent.getEpsilon(), reward, CombatAction.values()[previousAction].name(), agent.getStepCount(), target != null ? target.getName().getString() : "None");
@@ -86,11 +98,16 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
 
         tickCounter++;
         if (tickCounter % 1000 == 0 && !evaluationMode) {
-            ModelSerializer.saveAgent(agent, modelFile);
+            trainingExecutor.submit(() -> ModelSerializer.saveAgent(agent, modelFile));
         }
     }
 
     public void setEvaluationMode(boolean eval) {
         this.evaluationMode = eval;
+    }
+
+    // Call this when Minecraft shuts down to prevent memory leaks
+    public void shutdown() {
+        trainingExecutor.shutdown();
     }
 }
