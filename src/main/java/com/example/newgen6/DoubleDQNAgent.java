@@ -11,11 +11,13 @@ public class DoubleDQNAgent {
     private final float gamma = 0.99f;
     private float epsilon = 1.0f;
     private final float epsilonMin = 0.05f;
-    private final float epsilonDecay = 0.9999f;
-    private final int batchSize = 64;
+    private final float epsilonDecay = 0.9995f; // Faster decay so it learns to aim sooner
+    private final int batchSize = 16;           // Dropped from 64 to 16 to fix CPU lag
     private final int targetUpdateFrequency = 1000;
+    private final int warmupSize = 200;         // Starts training much earlier than 1000
     
-    private int stepCount = 0;
+    private int trainingStepCount = 0;
+    private int gameStepCount = 0;
     private final Random random = new Random();
 
     public DoubleDQNAgent(int inputSize, int actionCount) {
@@ -26,7 +28,7 @@ public class DoubleDQNAgent {
         this.replayBuffer = new ReplayBuffer(100000);
     }
 
-    public int selectAction(float[] state, boolean evaluationMode) {
+    public synchronized int selectAction(float[] state, boolean evaluationMode) {
         if (!evaluationMode && random.nextFloat() < epsilon) {
             return random.nextInt(actionCount);
         }
@@ -43,24 +45,16 @@ public class DoubleDQNAgent {
         return bestAction;
     }
 
-    public void step(float[] state, int action, float reward, float[] nextState, boolean done) {
+    // Instantly logs environment step on main thread (zero overhead)
+    public void addExperience(float[] state, int action, float reward, float[] nextState, boolean done) {
         replayBuffer.add(state, action, reward, nextState, done);
-        
-        if (replayBuffer.size() >= 1000) {
-            trainBatch();
-            
-            if (epsilon > epsilonMin) {
-                epsilon *= epsilonDecay;
-            }
-            
-            stepCount++;
-            if (stepCount % targetUpdateFrequency == 0) {
-                targetNetwork.copyWeightsFrom(onlineNetwork);
-            }
-        }
+        gameStepCount++;
     }
 
-    private void trainBatch() {
+    // Runs safely on the background thread
+    public synchronized void trainBatch() {
+        if (replayBuffer.size() < warmupSize) return;
+
         Transition[] batch = replayBuffer.sample(batchSize);
         
         for (Transition t : batch) {
@@ -85,11 +79,21 @@ public class DoubleDQNAgent {
             qOnline[t.action] = targetQ;
             onlineNetwork.trainStep(t.state, qOnline, 1.0f);
         }
+
+        if (epsilon > epsilonMin) {
+            epsilon *= epsilonDecay;
+        }
+
+        trainingStepCount++;
+        if (trainingStepCount % targetUpdateFrequency == 0) {
+            targetNetwork.copyWeightsFrom(onlineNetwork);
+        }
     }
 
-    public JavaMLP getOnlineNetwork() { return onlineNetwork; }
+    public synchronized JavaMLP getOnlineNetwork() { return onlineNetwork; }
     public float getEpsilon() { return epsilon; }
     public void setEpsilon(float epsilon) { this.epsilon = epsilon; }
-    public int getStepCount() { return stepCount; }
-    public void setStepCount(int stepCount) { this.stepCount = stepCount; }
+    public int getTrainingStepCount() { return trainingStepCount; }
+    public int getGameStepCount() { return gameStepCount; }
+    public void setTrainingStepCount(int stepCount) { this.trainingStepCount = stepCount; }
 }
