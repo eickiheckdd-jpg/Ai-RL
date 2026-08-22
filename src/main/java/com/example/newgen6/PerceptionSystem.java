@@ -15,32 +15,45 @@ public class PerceptionSystem {
         obs[0] = player.getHealth() / player.getMaxHealth();
         obs[1] = player.getAttackCooldownProgress(0.0f);
         obs[2] = player.isBlocking() ? 1.0f : 0.0f;
-        
+
         if (target != null) {
             boolean visible = client.crosshairTarget != null && 
                               client.crosshairTarget.getType() == HitResult.Type.ENTITY && 
-                              ((EntityHitResult)client.crosshairTarget).getEntity().equals(target);
-            
+                              ((EntityHitResult) client.crosshairTarget).getEntity().equals(target);
+
             obs[3] = visible ? 1.0f : 0.0f;
             obs[4] = target.getHealth() / target.getMaxHealth();
-            
+
             double dx = target.getX() - player.getX();
             double dy = target.getEyeY() - player.getEyeY();
             double dz = target.getZ() - player.getZ();
-            double distance = Math.sqrt(dx*dx + dy*dy + dz*dz);
+            double distance = Math.sqrt(dx * dx + dy * dy + dz * dz);
             obs[5] = (float) Math.min(1.0, distance / 32.0);
 
-            double targetYaw = Math.toDegrees(Math.atan2(dz, dx)) - 90;
-            double targetPitch = Math.toDegrees(-Math.atan2(dy, Math.sqrt(dx*dx + dz*dz)));
+            double targetYaw = Math.toDegrees(Math.atan2(dz, dx)) - 90.0;
+            double targetPitch = Math.toDegrees(-Math.atan2(dy, Math.sqrt(dx * dx + dz * dz)));
+
+            double yawDiffDeg = wrapDegrees(targetYaw - player.getYaw());
+            double pitchDiffDeg = targetPitch - player.getPitch();
+
+            float yawDiffNorm = (float) Math.max(-1.0, Math.min(1.0, yawDiffDeg / 180.0));
+            float pitchDiffNorm = (float) Math.max(-1.0, Math.min(1.0, pitchDiffDeg / 90.0));
+
+            obs[6] = (float) Math.sin(yawDiffNorm * Math.PI);
+            obs[7] = (float) Math.cos(yawDiffNorm * Math.PI);
             
-            float yawDiff = (float) Math.max(-1.0, Math.min(1.0, (targetYaw - player.getYaw()) / 180.0));
-            float pitchDiff = (float) Math.max(-1.0, Math.min(1.0, (targetPitch - player.getPitch()) / 90.0));
-            
-            obs[6] = (float) Math.sin(yawDiff * Math.PI);
-            obs[7] = (float) Math.cos(yawDiff * Math.PI);
-            obs[8] = pitchDiff; // This doubles as aim alignment
+            // Combined angular error normalized between 0.0 (perfect) and 1.0 (terrible)
+            float totalError = (float) Math.min(1.0, Math.sqrt(yawDiffNorm * yawDiffNorm + pitchDiffNorm * pitchDiffNorm));
+            obs[8] = totalError;
         }
-        
+
         return obs;
+    }
+
+    private static double wrapDegrees(double degrees) {
+        double wrapped = degrees % 360.0;
+        if (wrapped >= 180.0) wrapped -= 360.0;
+        if (wrapped < -180.0) wrapped += 360.0;
+        return wrapped;
     }
 }
