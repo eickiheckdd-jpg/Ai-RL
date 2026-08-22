@@ -104,10 +104,10 @@ public final class Newgen6Client implements ClientModInitializer {
      */
     private static final int ACTIONS = 14;
 
-    private static final NeuralPolicy POLICY =
-            new NeuralPolicy(INPUTS, 64, 64, ACTIONS);
-
     private static final Random RANDOM = new Random();
+
+private static final NeuralPolicy POLICY =
+        new NeuralPolicy(INPUTS, 64, 64, ACTIONS);
 
     private static final double LEARNING_RATE = 0.00015;
     private static final int MAX_EXPERIENCES = 250_000;
