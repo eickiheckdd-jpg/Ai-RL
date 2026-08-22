@@ -2,7 +2,9 @@ package com.example.newgen6;
 
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.LivingEntity;
+import org.lwjgl.glfw.GLFW;
 import java.io.File;
 
 public class RLClientTickHandler implements ClientTickEvents.EndTick {
@@ -14,8 +16,12 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
     private float[] previousState = null;
     private int previousAction = 0;
     private boolean evaluationMode = false;
+    private boolean botEnabled = true; // Controlled by 'C' key
     private int tickCounter = 0;
     private final File modelFile;
+    
+    private boolean cKeyWasPressed = false;
+    private boolean xKeyWasPressed = false;
 
     public RLClientTickHandler(TrainingHudOverlay hudOverlay) {
         this.hudOverlay = hudOverlay;
@@ -29,6 +35,25 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
     public void onEndTick(MinecraftClient client) {
         if (client.player == null || client.world == null || client.isPaused()) return;
 
+        long window = client.getWindow().getHandle();
+
+        // Toggle Bot with 'C' key
+        boolean cPressed = InputUtil.isKeyPressed(window, GLFW.GLFW_KEY_C);
+        if (cPressed && !cKeyWasPressed) {
+            botEnabled = !botEnabled;
+            System.out.println("[Newgen6] Bot Active: " + botEnabled);
+        }
+        cKeyWasPressed = cPressed;
+
+        // Toggle HUD with 'X' key
+        boolean xPressed = InputUtil.isKeyPressed(window, GLFW.GLFW_KEY_X);
+        if (xPressed && !xKeyWasPressed) {
+            hudOverlay.toggle();
+        }
+        xKeyWasPressed = xPressed;
+
+        if (!botEnabled) return;
+
         LivingEntity target = targetSelector.findBestTarget(client);
         float[] currentState = PerceptionSystem.getObservation(client, target);
         float aimAlignment = currentState[8]; 
@@ -38,7 +63,10 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
             boolean done = client.player.isDead() || (target != null && target.isDead());
             
             if (!evaluationMode) {
-                agent.step(previousState, previousAction, reward, currentState, done);
+                // Throttle training to every 5 ticks to prevent main-thread freezing
+                if (tickCounter % 5 == 0) {
+                    agent.step(previousState, previousAction, reward, currentState, done);
+                }
             }
 
             hudOverlay.updateStats(agent.getEpsilon(), reward, CombatAction.values()[previousAction].name(), agent.getStepCount(), target != null ? target.getName().getString() : "None");
@@ -53,7 +81,6 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
         int actionIndex = agent.selectAction(currentState, evaluationMode);
         CombatAction action = CombatAction.values()[actionIndex];
         
-        // Reset inputs from previous tick to avoid sticky keys
         client.options.useKey.setPressed(false);
         action.execute(client);
 
