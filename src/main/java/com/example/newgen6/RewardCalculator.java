@@ -14,8 +14,9 @@ public class RewardCalculator {
     public static float DEATH_PENALTY = 10.0f;
     public static float AIM_ALIGNMENT_REWARD = 0.05f;
     public static float INVALID_ACTION_PENALTY = 0.1f;
+    public static float UNNECESSARY_JUMP_PENALTY = 0.05f;
 
-    public float calculateReward(MinecraftClient client, LivingEntity target, boolean wasInvalidAction, float aimAlignment) {
+    public float calculateReward(MinecraftClient client, LivingEntity target, boolean wasInvalidAction, boolean wasUnnecessaryJump, float aimAlignment) {
         if (client.player == null) return 0.0f;
 
         float reward = 0.0f;
@@ -31,7 +32,6 @@ public class RewardCalculator {
 
         // Target damage rewards
         if (target != null) {
-            // Prevent health delta spikes if target entity changed this tick
             if (lastTargetRef != target) {
                 lastTargetRef = target;
                 lastTargetHealth = target.getHealth();
@@ -46,8 +46,10 @@ public class RewardCalculator {
             }
             lastTargetHealth = currentTargetHealth;
 
-            // Aim alignment reward/penalty range [-0.05, +0.05]
-            reward += (0.5f - Math.abs(aimAlignment)) * (AIM_ALIGNMENT_REWARD * 2.0f);
+            // SCALED AIM PENALTY: 
+            // Multiplying by 4.0f makes off-target states drop into a heavier negative reward (-0.2f max)
+            // instead of a weak -0.05f tap, forcing the network to correct its aim faster.
+            reward += (0.5f - Math.abs(aimAlignment)) * (AIM_ALIGNMENT_REWARD * 4.0f);
         } else {
             lastTargetRef = null;
             lastTargetHealth = 20.0f;
@@ -55,6 +57,10 @@ public class RewardCalculator {
 
         if (wasInvalidAction) {
             reward -= INVALID_ACTION_PENALTY;
+        }
+
+        if (wasUnnecessaryJump) {
+            reward -= UNNECESSARY_JUMP_PENALTY;
         }
 
         lastPlayerHealth = currentPlayerHealth;
