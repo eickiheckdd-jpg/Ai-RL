@@ -130,7 +130,7 @@ public class Newgen6Client implements ClientModInitializer {
                 new KeyBinding(
                         "key.newgen6.master",
                         GLFW.GLFW_KEY_C,
-                        "category.newgen6"
+                        NEWGEN6_CATEGORY
                 )
         );
 
