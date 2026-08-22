@@ -21,18 +21,9 @@ import java.nio.file.Path;
 import java.util.*;
 
 /**
- * Newgen6 - self-contained sword PvP data collector + lightweight
- * policy-gradient trainer.
+ * Newgen6 - Fixed strictly On-Policy REINFORCE Agent.
  *
  * C = master toggle.
- *
- * When enabled:
- *   - records human sword PvP experience
- *   - trains the neural policy online
- *
- * AI control is deliberately OFF while collecting human demonstrations.
- * Set ENABLE_AI_CONTROL_AFTER_TRAINING to true if you want C to hand
- * control to the learned policy immediately.
  */
 public final class Newgen6Client implements ClientModInitializer {
 
@@ -43,86 +34,30 @@ public final class Newgen6Client implements ClientModInitializer {
                     Identifier.of("newgen6", "general")
             );
 
-    private static KeyBinding recordKey;
-    /*
-     * Change this to true only when you want C to enable AI control too.
-     * Default false = C records + trains from your gameplay.
-     */
-    private static final boolean ENABLE_AI_CONTROL_AFTER_TRAINING = false;
+    private static final boolean ENABLE_AI_CONTROL_AFTER_TRAINING = true;
 
     private static Path DATA_DIR;
     private static Path MODEL_FILE;
-    private static Path EXPERIENCE_FILE;
-
     private static KeyBinding MASTER_KEY;
 
     private static boolean enabled = false;
-    private static boolean recording = false;
     private static boolean training = false;
     private static boolean aiEnabled = false;
 
-    /*
-     * Observation:
-     * 0  distance
-     * 1  relative X
-     * 2  relative Y
-     * 3  relative Z
-     * 4  relative velocity X
-     * 5  relative velocity Y
-     * 6  relative velocity Z
-     * 7  player velocity X
-     * 8  player velocity Y
-     * 9  player velocity Z
-     * 10 player health
-     * 11 enemy health
-     * 12 yaw error
-     * 13 pitch error
-     * 14 attack cooldown
-     * 15 player sprinting
-     * 16 enemy sprinting
-     * 17 player on ground
-     * 18 enemy on ground
-     */
     private static final int FRAME_INPUTS = 19;
     private static final int HISTORY_FRAMES = 50; // 5 seconds at 10 Hz
     private static final int INPUTS = FRAME_INPUTS * HISTORY_FRAMES;
-
-    /*
-     * Actions:
-     * 0  idle
-     * 1  forward
-     * 2  backward
-     * 3  left
-     * 4  right
-     * 5  forward-left
-     * 6  forward-right
-     * 7  backward-left
-     * 8  backward-right
-     * 9  attack
-     * 10 forward + attack
-     * 11 left + attack
-     * 12 right + attack
-     * 13 jump
-     */
     private static final int ACTIONS = 20;
 
-    // Six learned aim actions, expressed as small camera deltas.
-    // 14-19 are yaw/pitch combinations: left/right/up/down and diagonals.
-    private static final float[] AIM_YAW =
-            {-4f, 4f, 0f, 0f, -3f, 3f};
-    private static final float[] AIM_PITCH =
-            {0f, 0f, -3f, 3f, -2f, -2f};
+    private static final float[] AIM_YAW = {-4f, 4f, 0f, 0f, -3f, 3f};
+    private static final float[] AIM_PITCH = {0f, 0f, -3f, 3f, -2f, -2f};
 
     private static final Random RANDOM = new Random();
 
-private static final NeuralPolicy POLICY =
-        new NeuralPolicy(INPUTS, 64, 64, ACTIONS);
+    private static final NeuralPolicy POLICY =
+            new NeuralPolicy(INPUTS, 64, 64, ACTIONS);
 
     private static final double LEARNING_RATE = 0.00015;
-    private static final int MAX_EXPERIENCES = 250_000;
-
-    private static final ArrayDeque<Experience> EXPERIENCE =
-            new ArrayDeque<>();
 
     private static final double[] HISTORY = new double[INPUTS];
     private static int historyTick;
@@ -136,7 +71,6 @@ private static final NeuralPolicy POLICY =
 
         DATA_DIR = client.runDirectory.toPath().resolve("newgen6");
         MODEL_FILE = DATA_DIR.resolve("model.bin");
-        EXPERIENCE_FILE = DATA_DIR.resolve("experience.bin");
 
         try {
             Files.createDirectories(DATA_DIR);
@@ -154,13 +88,9 @@ private static final NeuralPolicy POLICY =
                 )
         );
 
-        ClientTickEvents.END_CLIENT_TICK.register(
-                Newgen6Client::tick
-        );
+        ClientTickEvents.END_CLIENT_TICK.register(Newgen6Client::tick);
 
-        System.out.println("[Newgen6] Loaded.");
-        System.out.println("[Newgen6] C = enable/disable");
-        System.out.println("[Newgen6] Data directory: " + DATA_DIR);
+        System.out.println("[Newgen6] Loaded (Strict On-Policy Mode).");
     }
 
     private static void tick(MinecraftClient client) {
@@ -170,10 +100,8 @@ private static final NeuralPolicy POLICY =
 
         while (MASTER_KEY.wasPressed()) {
             enabled = !enabled;
-
-            recording = false;
             training = enabled;
-            aiEnabled = enabled;
+            aiEnabled = enabled; // Forces AI control when enabled
 
             if (enabled) {
                 previousObservation = null;
@@ -181,21 +109,13 @@ private static final NeuralPolicy POLICY =
                 Arrays.fill(HISTORY, 0.0);
                 historyTick = 0;
 
-                System.out.println("[Newgen6] ENABLED");
-                System.out.println(
-                        "[Newgen6] Recording: " + recording +
-                        " | Training: " + training +
-                        " | AI: " + aiEnabled +
-                        " | Exploration: 20% random actions"                );
+                System.out.println("[Newgen6] ENABLED - AI taking control");
             } else {
                 System.out.println("[Newgen6] DISABLED");
                 releaseInputs(client);
                 saveModel();
-                saveExperience();
                 previousObservation = null;
                 previousAction = -1;
-                Arrays.fill(HISTORY, 0.0);
-                historyTick = 0;
             }
         }
 
@@ -204,140 +124,60 @@ private static final NeuralPolicy POLICY =
         }
 
         Observation frame = observe(client.player);
-
         if (frame == null) {
             return;
         }
 
-        // Sample at 10 Hz and maintain a rolling 5-second observation history.
         if ((client.player.age & 1) != 0) {
             return;
         }
+        
         pushHistory(frame.values);
         Observation current = new Observation(HISTORY);
 
-        if (current == null) {
-            return;
-        }
-
-        /*
-         * Human demonstration collection.
-         */
-        if (recording && !aiEnabled) {
-            int action = getHumanAction(client);
-
-            if (previousObservation != null &&
-                    previousAction >= 0) {
-
-                double reward =
-                        calculateReward(
-                                previousObservation,
-                                current
-                        );
-
-                addExperience(
-                        new Experience(
-                                previousObservation.values,
-                                previousAction,
-                                reward,
-                                current.values
-                        )
-                );
-
-                /*
-                 * Online learning.
-                 */
-                if (training && client.player.age % 2 == 0) {
-                    trainOne();
-                }
-            }
-
-            previousObservation = current;
-            previousAction = action;
-        }
-
-        /*
-         * Optional autonomous AI mode.
-         */
         if (aiEnabled) {
             runAI(client, current);
-
-            if (training && client.player.age % 2 == 0) {
-                trainOne();
-            }
         }
 
-        /*
-         * Save every 60 seconds.
-         */
         if (client.player.age % 1200 == 0) {
             saveModel();
-            saveExperience();
         }
     }
 
     private static Observation observe(ClientPlayerEntity player) {
         PlayerEntity enemy = findNearestOpponent(player);
-
-        if (enemy == null) {
-            return null;
-        }
+        if (enemy == null) return null;
 
         double rx = enemy.getX() - player.getX();
         double ry = enemy.getY() - player.getY();
         double rz = enemy.getZ() - player.getZ();
 
-        double distance =
-                Math.sqrt(rx * rx + ry * ry + rz * rz);
-
+        double distance = Math.sqrt(rx * rx + ry * ry + rz * rz);
         var pv = player.getVelocity();
         var ev = enemy.getVelocity();
 
-        float desiredYaw =
-                (float) Math.toDegrees(
-                        Math.atan2(-rx, rz)
-                );
-
-        float yawError =
-                wrapDegrees(desiredYaw - player.getYaw());
-
-        double horizontal =
-                Math.sqrt(rx * rx + rz * rz);
-
-        float desiredPitch =
-                (float) -Math.toDegrees(
-                        Math.atan2(ry, horizontal)
-                );
-
-        float pitchError =
-                desiredPitch - player.getPitch();
-
-        float cooldown =
-                player.getAttackCooldownProgress(0.0f);
+        float desiredYaw = (float) Math.toDegrees(Math.atan2(-rx, rz));
+        float yawError = wrapDegrees(desiredYaw - player.getYaw());
+        double horizontal = Math.sqrt(rx * rx + rz * rz);
+        float desiredPitch = (float) -Math.toDegrees(Math.atan2(ry, horizontal));
+        float pitchError = desiredPitch - player.getPitch();
 
         double[] x = new double[FRAME_INPUTS];
-
         x[0] = clamp(distance / 8.0);
         x[1] = clamp(rx / 8.0);
         x[2] = clamp(ry / 4.0);
         x[3] = clamp(rz / 8.0);
-
         x[4] = clamp((ev.x - pv.x) / 2.0);
         x[5] = clamp((ev.y - pv.y) / 2.0);
         x[6] = clamp((ev.z - pv.z) / 2.0);
-
         x[7] = clamp(pv.x / 2.0);
         x[8] = clamp(pv.y / 2.0);
         x[9] = clamp(pv.z / 2.0);
-
         x[10] = clamp(player.getHealth() / 20.0);
         x[11] = clamp(enemy.getHealth() / 20.0);
-
         x[12] = clamp(yawError / 180.0);
         x[13] = clamp(pitchError / 90.0);
-
-        x[14] = cooldown;
-
+        x[14] = player.getAttackCooldownProgress(0.0f);
         x[15] = player.isSprinting() ? 1.0 : 0.0;
         x[16] = enemy.isSprinting() ? 1.0 : 0.0;
         x[17] = player.isOnGround() ? 1.0 : 0.0;
@@ -346,430 +186,136 @@ private static final NeuralPolicy POLICY =
         return new Observation(x);
     }
 
-    private static PlayerEntity findNearestOpponent(
-            ClientPlayerEntity player
-    ) {
+    private static PlayerEntity findNearestOpponent(ClientPlayerEntity player) {
         PlayerEntity best = null;
         double bestDistanceSq = 12.0 * 12.0;
 
-        for (PlayerEntity other :
-                player.getEntityWorld().getPlayers()) {
-
-            if (other == player || other.isDead()) {
-                continue;
-            }
-
+        for (PlayerEntity other : player.getEntityWorld().getPlayers()) {
+            if (other == player || other.isDead()) continue;
             double d = player.squaredDistanceTo(other);
-
             if (d < bestDistanceSq) {
                 bestDistanceSq = d;
                 best = other;
             }
         }
-
         return best;
     }
 
-    private static int getHumanAction(MinecraftClient client) {
-        if (client.options.attackKey.isPressed()) {
-            if (client.options.leftKey.isPressed()) return 11;
-            if (client.options.rightKey.isPressed()) return 12;
-            if (client.options.forwardKey.isPressed()) return 10;
-            return 9;
+    private static void runAI(MinecraftClient client, Observation observation) {
+        ClientPlayerEntity player = client.player;
+        if (player == null) return;
+
+        double[] state = observation.values.clone();
+
+        // Let the Softmax distribution handle exploration naturally.
+        int action = POLICY.chooseAction(state, 1.0);
+
+        applyAction(client, action);
+        if (action >= 14) {
+            applyAimAction(client, action - 14);
         }
 
-        boolean forward =
-                client.options.forwardKey.isPressed();
-        boolean backward =
-                client.options.backKey.isPressed();
-        boolean left =
-                client.options.leftKey.isPressed();
-        boolean right =
-                client.options.rightKey.isPressed();
-        boolean jump =
-                client.options.jumpKey.isPressed();
+        Observation frame = observe(client.player);
+        if (frame == null) return;
+        
+        // Push the new result to history to create the "next state"
+        pushHistory(frame.values);
+        Observation nextState = new Observation(HISTORY);
 
-        if (jump) return 13;
-        if (forward && left) return 5;
-        if (forward && right) return 6;
-        if (backward && left) return 7;
-        if (backward && right) return 8;
-        if (forward) return 1;
-        if (backward) return 2;
-        if (left) return 3;
-        if (right) return 4;
+        if (previousObservation != null) {
+            // Compare previous full history to new full history
+            double reward = calculateUnifiedReward(previousObservation, nextState);
+            POLICY.train(previousObservation.values, previousAction, reward, LEARNING_RATE);
+            
+            if (player.age % 20 == 0) {
+                System.out.println("[Newgen6] AI Action: " + action + 
+                                   " | Reward: " + String.format(java.util.Locale.ROOT, "%.4f", reward));
+            }
+        }
 
-        return 0;
+        previousObservation = nextState;
+        previousAction = action;
     }
 
-    private static double calculateReward(
-            Observation oldState,
-            Observation newState
-    ) {
+    private static double calculateUnifiedReward(Observation oldState, Observation newState) {
         final int last = INPUTS - FRAME_INPUTS;
 
         double oldPlayerHP = oldState.values[last + 10];
         double newPlayerHP = newState.values[last + 10];
-
         double oldEnemyHP = oldState.values[last + 11];
         double newEnemyHP = newState.values[last + 11];
 
         double damageDealt = oldEnemyHP - newEnemyHP;
         double damageTaken = oldPlayerHP - newPlayerHP;
 
-        double reward = 0.0;
+        double reward = (damageDealt * 20.0) - (damageTaken * 25.0);
 
-        reward += damageDealt * 20.0;
-        reward -= damageTaken * 25.0;
-
+        // Distance reward
         double distance = newState.values[last] * 8.0;
+        if (distance >= 2.0 && distance <= 4.0) reward += 0.02;
 
-        if (distance >= 2.0 && distance <= 4.0) {
-            reward += 0.02;
-        }
-
-        double yawError =
-                Math.abs(newState.values[last + 12] * 180.0);
-
-        if (yawError < 15.0) {
-            reward += 0.02;
-        }
-
-        if (newPlayerHP <= 0.001) {
-            reward -= 100.0;
-        }
-
-        if (newEnemyHP <= 0.001) {
-            reward += 100.0;
-        }
-
-        reward -= 0.001;
-
-        return reward;
-    }
-
-    private static void addExperience(Experience e) {
-        if (EXPERIENCE.size() >= MAX_EXPERIENCES) {
-            EXPERIENCE.pollFirst();
-        }
-
-        EXPERIENCE.addLast(e);
-    }
-
-    private static void trainOne() {
-        if (EXPERIENCE.isEmpty()) return;
-
-        int index = RANDOM.nextInt(EXPERIENCE.size());
-
-        Iterator<Experience> iterator =
-                EXPERIENCE.iterator();
-
-        for (int i = 0; i < index; i++) {
-            iterator.next();
-        }
-
-        Experience e = iterator.next();
-
-        POLICY.train(
-                e.state,
-                e.action,
-                e.reward,
-                LEARNING_RATE
-        );
-    }
-
-    private static void runAI(
-            MinecraftClient client,
-            Observation observation
-    ) {
-        ClientPlayerEntity player = client.player;
-
-        if (player == null) {
-            return;
-        }
-
-        double[] state = observation.values.clone();
-
-        /*
-         * Real exploration:
-         * 20% of the time choose a completely random action.
-         * Otherwise sample from the neural policy.
-         *
-         * This prevents an initially random policy from accidentally
-         * becoming conservative before it has collected useful data.
-         */
-        int action;
-        if (RANDOM.nextDouble() < 0.20) {
-            action = RANDOM.nextInt(ACTIONS);
-        } else {
-            action = POLICY.chooseAction(state, 1.0);
-        }
-
-        /*
-         * Apply the action selected by the policy/environment.
-         * Actions 14-19 are actual camera movements.
-         */
-        applyAction(client, action);
-
-        if (action >= 14) {
-            applyAimAction(client, action - 14);
-        }
-
-        /*
-         * Measure the environment AFTER the action and compute reward.
-         */
-        Observation next = observe(client.player);
-        if (next == null) {
-            return;
-        }
-
-        double reward = calculateAiReward(observation, next, action);
-
-        Experience experience = new Experience(
-                state,
-                action,
-                reward,
-                next.values
-        );
-
-        addExperience(experience);
-
-        /*
-         * Immediate policy-gradient update from the action the AI
-         * actually took. This is not training only on old human data.
-         */
-        POLICY.train(
-                experience.state,
-                experience.action,
-                experience.reward,
-                LEARNING_RATE
-        );
-
-        previousObservation = next;
-        previousAction = action;
-
-        /*
-         * Small replay updates from previous AI experience.
-         */
-        if (EXPERIENCE.size() >= 32 && player.age % 5 == 0) {
-            int replayCount = Math.min(8, EXPERIENCE.size());
-
-            for (int i = 0; i < replayCount; i++) {
-                int index = RANDOM.nextInt(EXPERIENCE.size());
-                Iterator<Experience> it = EXPERIENCE.iterator();
-
-                for (int j = 0; j < index; j++) {
-                    it.next();
-                }
-
-                Experience old = it.next();
-
-                POLICY.train(
-                        old.state,
-                        old.action,
-                        old.reward,
-                        LEARNING_RATE
-                );
-            }
-        }
-
-        /*
-         * Debug output so you can verify that the AI is really acting.
-         */
-        if (player.age % 20 == 0) {
-            System.out.println(
-                    "[Newgen6] RL step=" + EXPERIENCE.size() +
-                    " action=" + action +
-                    " reward=" + String.format(java.util.Locale.ROOT, "%.5f", reward)
-            );
-        }
-    }
-
-    private static double calculateAiReward(
-            Observation before,
-            Observation after,
-            int action
-    ) {
-        // before/after are single 19-value observations.
-        // The 950-value history is only the neural-network input.
-        // Never index the single frame using INPUTS - FRAME_INPUTS.
-        if (before == null || after == null ||
-                before.values == null || after.values == null ||
-                before.values.length < 14 || after.values.length < 14) {
-            return -0.001;
-        }
-
-        double beforeYaw = before.values[12] * 180.0;
-        double beforePitch = before.values[13] * 90.0;
-
-        double afterYaw = after.values[12] * 180.0;
-        double afterPitch = after.values[13] * 90.0;
+        // Aim reward (indexing the most recent frame in history)
+        double beforeYaw = oldState.values[last + 12] * 180.0;
+        double beforePitch = oldState.values[last + 13] * 90.0;
+        double afterYaw = newState.values[last + 12] * 180.0;
+        double afterPitch = newState.values[last + 13] * 90.0;
 
         double beforeError = Math.hypot(beforeYaw, beforePitch);
         double afterError = Math.hypot(afterYaw, afterPitch);
 
-        // Dense reward: improving aim is positive; making it worse is negative.
-        double reward = (beforeError - afterError) / 30.0;
+        reward += (beforeError - afterError) / 30.0;
+        if (afterError < 15.0) reward += 0.02;
 
-        // Small accuracy bonuses.
-        if (afterError < 10.0) {
-            reward += 0.03;
-        }
-        if (afterError < 3.0) {
-            reward += 0.08;
-        }
+        if (newPlayerHP <= 0.001) reward -= 100.0;
+        if (newEnemyHP <= 0.001) reward += 100.0;
 
-        // Keep exploration inexpensive rather than making early mistakes fatal.
+        // Small living/time penalty to force action
         reward -= 0.001;
-
-        return Math.max(-1.0, Math.min(1.0, reward));
+        return Math.max(-100.0, Math.min(100.0, reward));
     }
 
-    private static boolean holdingSword(
-            ClientPlayerEntity player
-    ) {
-        return isSword(player.getMainHandStack()) ||
-                isSword(player.getOffHandStack());
-    }
-
-    private static boolean isSword(ItemStack stack) {
-        return stack.isOf(Items.WOODEN_SWORD) ||
-                stack.isOf(Items.STONE_SWORD) ||
-                stack.isOf(Items.IRON_SWORD) ||
-                stack.isOf(Items.GOLDEN_SWORD) ||
-                stack.isOf(Items.DIAMOND_SWORD) ||
-                stack.isOf(Items.NETHERITE_SWORD);
-    }
-
-    private static void applyAction(
-            MinecraftClient client,
-            int action
-    ) {
+    private static void applyAction(MinecraftClient client, int action) {
         releaseMovement(client);
-
         switch (action) {
-            case 1 ->
-                    client.options.forwardKey.setPressed(true);
-
-            case 2 ->
-                    client.options.backKey.setPressed(true);
-
-            case 3 ->
-                    client.options.leftKey.setPressed(true);
-
-            case 4 ->
-                    client.options.rightKey.setPressed(true);
-
-            case 5 -> {
-                client.options.forwardKey.setPressed(true);
-                client.options.leftKey.setPressed(true);
-            }
-
-            case 6 -> {
-                client.options.forwardKey.setPressed(true);
-                client.options.rightKey.setPressed(true);
-            }
-
-            case 7 -> {
-                client.options.backKey.setPressed(true);
-                client.options.leftKey.setPressed(true);
-            }
-
-            case 8 -> {
-                client.options.backKey.setPressed(true);
-                client.options.rightKey.setPressed(true);
-            }
-
-            case 9 ->
-                    attack(client);
-
-            case 10 -> {
-                client.options.forwardKey.setPressed(true);
-                attack(client);
-            }
-
-            case 11 -> {
-                client.options.leftKey.setPressed(true);
-                attack(client);
-            }
-
-            case 12 -> {
-                client.options.rightKey.setPressed(true);
-                attack(client);
-            }
-
-            case 13 ->
-                    client.options.jumpKey.setPressed(true);
-
-            default -> {
-            }
+            case 1 -> client.options.forwardKey.setPressed(true);
+            case 2 -> client.options.backKey.setPressed(true);
+            case 3 -> client.options.leftKey.setPressed(true);
+            case 4 -> client.options.rightKey.setPressed(true);
+            case 5 -> { client.options.forwardKey.setPressed(true); client.options.leftKey.setPressed(true); }
+            case 6 -> { client.options.forwardKey.setPressed(true); client.options.rightKey.setPressed(true); }
+            case 7 -> { client.options.backKey.setPressed(true); client.options.leftKey.setPressed(true); }
+            case 8 -> { client.options.backKey.setPressed(true); client.options.rightKey.setPressed(true); }
+            case 9 -> attack(client);
+            case 10 -> { client.options.forwardKey.setPressed(true); attack(client); }
+            case 11 -> { client.options.leftKey.setPressed(true); attack(client); }
+            case 12 -> { client.options.rightKey.setPressed(true); attack(client); }
+            case 13 -> client.options.jumpKey.setPressed(true);
         }
     }
 
-    private static void applyAimAction(
-            MinecraftClient client,
-            int aimAction
-    ) {
-        if (client.player == null ||
-                aimAction < 0 ||
-                aimAction >= AIM_YAW.length) {
-            return;
-        }
-
-        client.player.setYaw(
-                client.player.getYaw() + AIM_YAW[aimAction]
-        );
-        client.player.setPitch(
-                clampPitch(
-                        client.player.getPitch()
-                                + AIM_PITCH[aimAction]
-                )
-        );
+    private static void applyAimAction(MinecraftClient client, int aimAction) {
+        if (client.player == null || aimAction < 0 || aimAction >= AIM_YAW.length) return;
+        client.player.setYaw(client.player.getYaw() + AIM_YAW[aimAction]);
+        client.player.setPitch(clampPitch(client.player.getPitch() + AIM_PITCH[aimAction]));
     }
 
-    private static float clampPitch(float pitch) {
-        return Math.max(-90.0f, Math.min(90.0f, pitch));
-    }
+    private static float clampPitch(float pitch) { return Math.max(-90.0f, Math.min(90.0f, pitch)); }
 
     private static void attack(MinecraftClient client) {
-        if (client.interactionManager == null ||
-                client.player == null) {
-            return;
-        }
-
+        if (client.interactionManager == null || client.player == null) return;
         if (client.targetedEntity instanceof PlayerEntity target) {
-            client.interactionManager.attackEntity(
-                    client.player,
-                    target
-            );
-
-            client.player.swingHand(
-                    net.minecraft.util.Hand.MAIN_HAND
-            );
+            client.interactionManager.attackEntity(client.player, target);
+            client.player.swingHand(net.minecraft.util.Hand.MAIN_HAND);
         }
     }
 
     private static void pushHistory(double[] frame) {
-        System.arraycopy(
-                HISTORY,
-                FRAME_INPUTS,
-                HISTORY,
-                0,
-                INPUTS - FRAME_INPUTS
-        );
-        System.arraycopy(
-                frame,
-                0,
-                HISTORY,
-                INPUTS - FRAME_INPUTS,
-                FRAME_INPUTS
-        );
+        System.arraycopy(HISTORY, FRAME_INPUTS, HISTORY, 0, INPUTS - FRAME_INPUTS);
+        System.arraycopy(frame, 0, HISTORY, INPUTS - FRAME_INPUTS, FRAME_INPUTS);
         historyTick++;
     }
 
-    private static void releaseMovement(
-            MinecraftClient client
-    ) {
+    private static void releaseMovement(MinecraftClient client) {
         client.options.forwardKey.setPressed(false);
         client.options.backKey.setPressed(false);
         client.options.leftKey.setPressed(false);
@@ -777,16 +323,10 @@ private static final NeuralPolicy POLICY =
         client.options.jumpKey.setPressed(false);
     }
 
-    private static void releaseInputs(
-            MinecraftClient client
-    ) {
+    private static void releaseInputs(MinecraftClient client) {
         releaseMovement(client);
         client.options.attackKey.setPressed(false);
     }
-
-    /* ============================================================
-       NEURAL POLICY
-       ============================================================ */
 
     private static final class NeuralPolicy {
         private final int input;
@@ -794,55 +334,28 @@ private static final NeuralPolicy POLICY =
         private final int hidden2;
         private final int output;
 
-        private final double[][] w1;
-        private final double[][] w2;
-        private final double[][] w3;
+        private final double[][] w1, w2, w3;
+        private final double[] b1, b2, b3;
 
-        private final double[] b1;
-        private final double[] b2;
-        private final double[] b3;
+        // Advantage Baseline 
+        private double averageReward = 0.0;
 
-        NeuralPolicy(
-                int input,
-                int hidden1,
-                int hidden2,
-                int output
-        ) {
-            this.input = input;
-            this.hidden1 = hidden1;
-            this.hidden2 = hidden2;
-            this.output = output;
-
-            w1 = new double[input][hidden1];
-            w2 = new double[hidden1][hidden2];
-            w3 = new double[hidden2][output];
-
-            b1 = new double[hidden1];
-            b2 = new double[hidden2];
-            b3 = new double[output];
-
+        NeuralPolicy(int input, int hidden1, int hidden2, int output) {
+            this.input = input; this.hidden1 = hidden1; this.hidden2 = hidden2; this.output = output;
+            w1 = new double[input][hidden1]; w2 = new double[hidden1][hidden2]; w3 = new double[hidden2][output];
+            b1 = new double[hidden1]; b2 = new double[hidden2]; b3 = new double[output];
             initialize();
         }
 
         private void initialize() {
-            randomize(w1, input);
-            randomize(w2, hidden1);
-            randomize(w3, hidden2);
+            randomize(w1, input); randomize(w2, hidden1); randomize(w3, hidden2);
         }
 
-        private void randomize(
-                double[][] matrix,
-                int fanIn
-        ) {
-            double scale =
-                    Math.sqrt(2.0 / fanIn);
-
+        private void randomize(double[][] matrix, int fanIn) {
+            double scale = Math.sqrt(2.0 / fanIn);
             for (int i = 0; i < matrix.length; i++) {
-                for (int j = 0;
-                     j < matrix[i].length;
-                     j++) {
-                    matrix[i][j] =
-                            RANDOM.nextGaussian() * scale;
+                for (int j = 0; j < matrix[i].length; j++) {
+                    matrix[i][j] = RANDOM.nextGaussian() * scale;
                 }
             }
         }
@@ -854,489 +367,148 @@ private static final NeuralPolicy POLICY =
 
             for (int j = 0; j < hidden1; j++) {
                 double sum = b1[j];
-
-                for (int i = 0; i < input; i++) {
-                    sum += x[i] * w1[i][j];
-                }
-
+                for (int i = 0; i < input; i++) sum += x[i] * w1[i][j];
                 h1[j] = Math.max(0.0, sum);
             }
-
             for (int j = 0; j < hidden2; j++) {
                 double sum = b2[j];
-
-                for (int i = 0; i < hidden1; i++) {
-                    sum += h1[i] * w2[i][j];
-                }
-
+                for (int i = 0; i < hidden1; i++) sum += h1[i] * w2[i][j];
                 h2[j] = Math.max(0.0, sum);
             }
-
             for (int j = 0; j < output; j++) {
                 double sum = b3[j];
-
-                for (int i = 0; i < hidden2; i++) {
-                    sum += h2[i] * w3[i][j];
-                }
-
+                for (int i = 0; i < hidden2; i++) sum += h2[i] * w3[i][j];
                 logits[j] = sum;
             }
-
             return new Forward(h1, h2, logits);
         }
 
-        private int chooseAction(
-                double[] x,
-                double temperature
-        ) {
+        private int chooseAction(double[] x, double temperature) {
             Forward f = forward(x);
-            double[] probabilities =
-                    softmax(f.logits, temperature);
-
+            double[] probabilities = softmax(f.logits, temperature);
             double r = RANDOM.nextDouble();
             double cumulative = 0.0;
-
             for (int i = 0; i < probabilities.length; i++) {
                 cumulative += probabilities[i];
-
-                if (r <= cumulative) {
-                    return i;
-                }
+                if (r <= cumulative) return i;
             }
-
             return probabilities.length - 1;
         }
 
-        private void train(
-                double[] x,
-                int action,
-                double reward,
-                double lr
-        ) {
-            /*
-             * Keep the first implementation computationally light
-             * enough for Pojav/Android.
-             */
-            reward = Math.max(-100.0,
-                    Math.min(100.0, reward));
-
+        private void train(double[] x, int action, double reward, double lr) {
             Forward f = forward(x);
+            double[] probabilities = softmax(f.logits, 1.0);
+            double[] dLogits = new double[output];
 
-            double[] probabilities =
-                    softmax(f.logits, 1.0);
+            // Update moving baseline and calculate advantage
+            averageReward = (averageReward * 0.99) + (reward * 0.01);
+            double advantage = reward - averageReward;
 
-            double[] dLogits =
-                    new double[output];
-
-            /*
-             * REINFORCE:
-             * gradient log pi(a|s) * reward
-             */
             for (int i = 0; i < output; i++) {
-                dLogits[i] =
-                        -probabilities[i] * reward;
+                dLogits[i] = -probabilities[i] * advantage;
             }
-
-            dLogits[action] += reward;
+            dLogits[action] += advantage;
 
             for (int i = 0; i < hidden2; i++) {
                 for (int j = 0; j < output; j++) {
-                    w3[i][j] +=
-                            lr * dLogits[j] * f.h2[i];
+                    w3[i][j] += lr * dLogits[j] * f.h2[i];
                 }
             }
+            for (int j = 0; j < output; j++) b3[j] += lr * dLogits[j];
 
-            for (int j = 0; j < output; j++) {
-                b3[j] += lr * dLogits[j];
-            }
-
-            double[] dh2 =
-                    new double[hidden2];
-
+            double[] dh2 = new double[hidden2];
             for (int i = 0; i < hidden2; i++) {
                 double sum = 0.0;
-
-                for (int j = 0; j < output; j++) {
-                    sum += dLogits[j] * w3[i][j];
-                }
-
-                if (f.h2[i] <= 0.0) {
-                    sum = 0.0;
-                }
-
-                dh2[i] = sum;
+                for (int j = 0; j < output; j++) sum += dLogits[j] * w3[i][j];
+                dh2[i] = (f.h2[i] > 0.0) ? sum : 0.0;
             }
 
-            double[] dh1 =
-                    new double[hidden1];
-
+            double[] dh1 = new double[hidden1];
             for (int i = 0; i < hidden1; i++) {
                 double sum = 0.0;
-
-                for (int j = 0; j < hidden2; j++) {
-                    sum += dh2[j] * w2[i][j];
-                }
-
-                if (f.h1[i] <= 0.0) {
-                    sum = 0.0;
-                }
-
-                dh1[i] = sum;
+                for (int j = 0; j < hidden2; j++) sum += dh2[j] * w2[i][j];
+                dh1[i] = (f.h1[i] > 0.0) ? sum : 0.0;
             }
 
             for (int i = 0; i < hidden1; i++) {
-                for (int j = 0; j < hidden2; j++) {
-                    w2[i][j] +=
-                            lr * dh2[j] * f.h1[i];
-                }
+                for (int j = 0; j < hidden2; j++) w2[i][j] += lr * dh2[j] * f.h1[i];
             }
-
-            for (int j = 0; j < hidden2; j++) {
-                b2[j] += lr * dh2[j];
-            }
+            for (int j = 0; j < hidden2; j++) b2[j] += lr * dh2[j];
 
             for (int i = 0; i < input; i++) {
-                for (int j = 0; j < hidden1; j++) {
-                    w1[i][j] +=
-                            lr * dh1[j] * x[i];
-                }
+                for (int j = 0; j < hidden1; j++) w1[i][j] += lr * dh1[j] * x[i];
             }
-
-            for (int j = 0; j < hidden1; j++) {
-                b1[j] += lr * dh1[j];
-            }
-
-            clipWeights();
+            for (int j = 0; j < hidden1; j++) b1[j] += lr * dh1[j];
         }
 
-        private void clipWeights() {
-            clip(w1);
-            clip(w2);
-            clip(w3);
-            clip(b1);
-            clip(b2);
-            clip(b3);
-        }
-
-        private void clip(double[][] matrix) {
-            for (double[] row : matrix) {
-                for (int i = 0; i < row.length; i++) {
-                    row[i] =
-                            Math.max(-10.0,
-                                    Math.min(10.0, row[i]));
-                }
-            }
-        }
-
-        private void clip(double[] array) {
-            for (int i = 0; i < array.length; i++) {
-                array[i] =
-                        Math.max(-10.0,
-                                Math.min(10.0, array[i]));
-            }
-        }
-
-        private double[] softmax(
-                double[] logits,
-                double temperature
-        ) {
-            temperature =
-                    Math.max(0.05, temperature);
-
-            double[] probabilities =
-                    new double[logits.length];
-
-            double max =
-                    Arrays.stream(logits)
-                            .max()
-                            .orElse(0.0);
-
+        private double[] softmax(double[] logits, double temperature) {
+            double[] probabilities = new double[logits.length];
+            double max = Arrays.stream(logits).max().orElse(0.0);
             double sum = 0.0;
-
-            for (int i = 0;
-                 i < logits.length;
-                 i++) {
-
-                probabilities[i] =
-                        Math.exp(
-                                (logits[i] - max)
-                                        / temperature
-                        );
-
+            for (int i = 0; i < logits.length; i++) {
+                probabilities[i] = Math.exp((logits[i] - max) / temperature);
                 sum += probabilities[i];
             }
-
-            if (sum <= 0.0 ||
-                    Double.isNaN(sum)) {
-
-                Arrays.fill(
-                        probabilities,
-                        1.0 / probabilities.length
-                );
-
-                return probabilities;
-            }
-
-            for (int i = 0;
-                 i < probabilities.length;
-                 i++) {
-
-                probabilities[i] /= sum;
-            }
-
+            for (int i = 0; i < probabilities.length; i++) probabilities[i] /= sum;
             return probabilities;
         }
     }
 
-    private record Forward(
-            double[] h1,
-            double[] h2,
-            double[] logits
-    ) {}
+    private record Forward(double[] h1, double[] h2, double[] logits) {}
 
-    private static final class Observation
-            implements Serializable {
-
+    private static final class Observation implements Serializable {
         private final double[] values;
-
-        private Observation(double[] values) {
-            this.values =
-                    Arrays.copyOf(
-                            values,
-                            values.length
-                    );
-        }
+        private Observation(double[] values) { this.values = Arrays.copyOf(values, values.length); }
     }
-
-    private static final class Experience
-            implements Serializable {
-
-        private final double[] state;
-        private final int action;
-        private final double reward;
-        private final double[] nextState;
-
-        private Experience(
-                double[] state,
-                int action,
-                double reward,
-                double[] nextState
-        ) {
-            this.state =
-                    Arrays.copyOf(state, state.length);
-
-            this.action = action;
-            this.reward = reward;
-
-            this.nextState =
-                    Arrays.copyOf(
-                            nextState,
-                            nextState.length
-                    );
-        }
-    }
-
-    /* ============================================================
-       MODEL STORAGE
-       ============================================================ */
 
     private static void saveModel() {
         if (MODEL_FILE == null) return;
-
         try {
             Files.createDirectories(DATA_DIR);
-
-            try (DataOutputStream out =
-                         new DataOutputStream(
-                                 new BufferedOutputStream(
-                                         Files.newOutputStream(
-                                                 MODEL_FILE
-                                         )
-                                 ))) {
-
+            try (DataOutputStream out = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(MODEL_FILE)))) {
                 out.writeInt(1);
-
-                writeMatrix(out, POLICY.w1);
-                writeMatrix(out, POLICY.w2);
-                writeMatrix(out, POLICY.w3);
-
-                writeArray(out, POLICY.b1);
-                writeArray(out, POLICY.b2);
-                writeArray(out, POLICY.b3);
+                writeMatrix(out, POLICY.w1); writeMatrix(out, POLICY.w2); writeMatrix(out, POLICY.w3);
+                writeArray(out, POLICY.b1); writeArray(out, POLICY.b2); writeArray(out, POLICY.b3);
             }
-
-            System.out.println(
-                    "[Newgen6] Model saved."
-            );
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
+        } catch (IOException e) { e.printStackTrace(); }
     }
 
     private static void loadModel() {
-        if (MODEL_FILE == null ||
-                !Files.exists(MODEL_FILE)) {
-            return;
-        }
-
-        try (DataInputStream in =
-                     new DataInputStream(
-                             new BufferedInputStream(
-                                     Files.newInputStream(
-                                             MODEL_FILE
-                                     )
-                             ))) {
-
-            int version = in.readInt();
-
-            if (version != 1) {
-                throw new IOException(
-                        "Unsupported model version: "
-                                + version
-                );
-            }
-
-            readMatrix(in, POLICY.w1);
-            readMatrix(in, POLICY.w2);
-            readMatrix(in, POLICY.w3);
-
-            readArray(in, POLICY.b1);
-            readArray(in, POLICY.b2);
-            readArray(in, POLICY.b3);
-
-            System.out.println(
-                    "[Newgen6] Model loaded."
-            );
-
-        } catch (IOException e) {
-            System.err.println(
-                    "[Newgen6] Could not load model."
-            );
-            e.printStackTrace();
-        }
+        if (MODEL_FILE == null || !Files.exists(MODEL_FILE)) return;
+        try (DataInputStream in = new DataInputStream(new BufferedInputStream(Files.newInputStream(MODEL_FILE)))) {
+            if (in.readInt() != 1) throw new IOException("Unsupported model version.");
+            readMatrix(in, POLICY.w1); readMatrix(in, POLICY.w2); readMatrix(in, POLICY.w3);
+            readArray(in, POLICY.b1); readArray(in, POLICY.b2); readArray(in, POLICY.b3);
+        } catch (IOException e) { e.printStackTrace(); }
     }
 
-    private static void saveExperience() {
-        if (EXPERIENCE_FILE == null) return;
-
-        try {
-            Files.createDirectories(DATA_DIR);
-
-            try (DataOutputStream out =
-                         new DataOutputStream(
-                                 new BufferedOutputStream(
-                                         Files.newOutputStream(
-                                                 EXPERIENCE_FILE
-                                         )
-                                 ))) {
-
-                out.writeInt(EXPERIENCE.size());
-
-                for (Experience e : EXPERIENCE) {
-                    writeArray(out, e.state);
-                    out.writeInt(e.action);
-                    out.writeDouble(e.reward);
-                    writeArray(out, e.nextState);
-                }
-            }
-
-            System.out.println(
-                    "[Newgen6] Experiences saved: "
-                            + EXPERIENCE.size()
-            );
-
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-    }
-
-    private static void writeMatrix(
-            DataOutputStream out,
-            double[][] matrix
-    ) throws IOException {
+    private static void writeMatrix(DataOutputStream out, double[][] matrix) throws IOException {
         out.writeInt(matrix.length);
-
-        for (double[] row : matrix) {
-            out.writeInt(row.length);
-
-            for (double value : row) {
-                out.writeDouble(value);
-            }
-        }
+        for (double[] row : matrix) { out.writeInt(row.length); for (double value : row) out.writeDouble(value); }
     }
 
-    private static void readMatrix(
-            DataInputStream in,
-            double[][] matrix
-    ) throws IOException {
+    private static void readMatrix(DataInputStream in, double[][] matrix) throws IOException {
         int rows = in.readInt();
-
-        if (rows != matrix.length) {
-            throw new IOException(
-                    "Matrix row mismatch."
-            );
-        }
-
         for (int i = 0; i < rows; i++) {
             int cols = in.readInt();
-
-            if (cols != matrix[i].length) {
-                throw new IOException(
-                        "Matrix column mismatch."
-                );
-            }
-
-            for (int j = 0; j < cols; j++) {
-                matrix[i][j] = in.readDouble();
-            }
+            for (int j = 0; j < cols; j++) matrix[i][j] = in.readDouble();
         }
     }
 
-    private static void writeArray(
-            DataOutputStream out,
-            double[] array
-    ) throws IOException {
+    private static void writeArray(DataOutputStream out, double[] array) throws IOException {
         out.writeInt(array.length);
-
-        for (double value : array) {
-            out.writeDouble(value);
-        }
+        for (double value : array) out.writeDouble(value);
     }
 
-    private static void readArray(
-            DataInputStream in,
-            double[] array
-    ) throws IOException {
+    private static void readArray(DataInputStream in, double[] array) throws IOException {
         int length = in.readInt();
-
-        if (length != array.length) {
-            throw new IOException(
-                    "Array length mismatch."
-            );
-        }
-
-        for (int i = 0; i < length; i++) {
-            array[i] = in.readDouble();
-        }
+        for (int i = 0; i < length; i++) array[i] = in.readDouble();
     }
 
-    private static double clamp(double value) {
-        return Math.max(
-                -1.0,
-                Math.min(1.0, value)
-        );
-    }
-
+    private static double clamp(double value) { return Math.max(-1.0, Math.min(1.0, value)); }
     private static float wrapDegrees(float degrees) {
-        while (degrees >= 180.0f) {
-            degrees -= 360.0f;
-        }
-
-        while (degrees < -180.0f) {
-            degrees += 360.0f;
-        }
-
+        while (degrees >= 180.0f) degrees -= 360.0f;
+        while (degrees < -180.0f) degrees += 360.0f;
         return degrees;
     }
 }
