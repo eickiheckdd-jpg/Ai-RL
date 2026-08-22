@@ -186,7 +186,7 @@ private static final NeuralPolicy POLICY =
                         "[Newgen6] Recording: " + recording +
                         " | Training: " + training +
                         " | AI: " + aiEnabled +
-                        " | Exploration: 20% random actions
+                        " | Exploration: 20% random actions"
                 );
             } else {
                 System.out.println("[Newgen6] DISABLED");
