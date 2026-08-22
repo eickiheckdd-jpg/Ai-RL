@@ -6,6 +6,7 @@ import net.minecraft.entity.LivingEntity;
 public class RewardCalculator {
     private float lastPlayerHealth = 20.0f;
     private float lastTargetHealth = 20.0f;
+    private LivingEntity lastTargetRef = null;
 
     public static float DAMAGE_REWARD = 2.0f;
     public static float DAMAGE_TAKEN_PENALTY = 2.5f;
@@ -20,7 +21,7 @@ public class RewardCalculator {
         float reward = 0.0f;
         float currentPlayerHealth = client.player.getHealth();
 
-        // Health penalties (Player)
+        // Player damage taken penalties
         if (currentPlayerHealth < lastPlayerHealth) {
             reward -= (lastPlayerHealth - currentPlayerHealth) * DAMAGE_TAKEN_PENALTY;
         }
@@ -28,8 +29,14 @@ public class RewardCalculator {
             reward -= DEATH_PENALTY;
         }
 
-        // Combat rewards (Target)
+        // Target damage rewards
         if (target != null) {
+            // Prevent health delta spikes if target entity changed this tick
+            if (lastTargetRef != target) {
+                lastTargetRef = target;
+                lastTargetHealth = target.getHealth();
+            }
+
             float currentTargetHealth = target.getHealth();
             if (currentTargetHealth < lastTargetHealth) {
                 reward += (lastTargetHealth - currentTargetHealth) * DAMAGE_REWARD;
@@ -38,23 +45,25 @@ public class RewardCalculator {
                 reward += KILL_REWARD;
             }
             lastTargetHealth = currentTargetHealth;
-            
-            // SHIFTED GRADIENT: 
-            // If aimAlignment is 0.0 (perfect), reward is +0.05
-            // If aimAlignment is 1.0 (terrible), reward is -0.05
+
+            // Aim alignment reward/penalty range [-0.05, +0.05]
             reward += (0.5f - Math.abs(aimAlignment)) * (AIM_ALIGNMENT_REWARD * 2.0f);
         } else {
+            lastTargetRef = null;
             lastTargetHealth = 20.0f;
         }
 
-        if (wasInvalidAction) reward -= INVALID_ACTION_PENALTY;
-        lastPlayerHealth = currentPlayerHealth;
+        if (wasInvalidAction) {
+            reward -= INVALID_ACTION_PENALTY;
+        }
 
+        lastPlayerHealth = currentPlayerHealth;
         return reward;
     }
 
     public void reset(MinecraftClient client, LivingEntity target) {
         this.lastPlayerHealth = client.player != null ? client.player.getHealth() : 20.0f;
+        this.lastTargetRef = target;
         this.lastTargetHealth = target != null ? target.getHealth() : 20.0f;
     }
 }
