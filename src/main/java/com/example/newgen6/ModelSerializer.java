@@ -19,7 +19,7 @@ public class ModelSerializer {
             for (int i = 0; i < weights.length; i++) {
                 dos.writeInt(weights[i].length);
                 for (float w : weights[i]) dos.writeFloat(w);
-                
+
                 dos.writeInt(biases[i].length);
                 for (float b : biases[i]) dos.writeFloat(b);
             }
@@ -58,10 +58,10 @@ public class ModelSerializer {
                 if (bLen != biases[i].length) return false;
                 for (int j = 0; j < bLen; j++) biases[i][j] = dis.readFloat();
             }
-            
-            // Sync target network on successful load
-            agent.getOnlineNetwork().copyWeightsFrom(agent.getOnlineNetwork());
-            
+
+            // Sync target network correctly from online network
+            agent.getTargetNetwork().copyWeightsFrom(agent.getOnlineNetwork());
+
             return true;
         } catch (IOException e) {
             e.printStackTrace();
