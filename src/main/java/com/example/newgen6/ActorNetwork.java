@@ -4,7 +4,7 @@ import java.util.Random;
 public class ActorNetwork {
     private final int inputSize, outputSize;
     private final int hidden = 64;
-    private final float[] w1, b1, w2, b2;
+    public final float[] w1, b1, w2, b2; // Changed to public
 
     public ActorNetwork(int inputSize, int outputSize) {
         this.inputSize = inputSize;
