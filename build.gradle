@@ -1,9 +1,6 @@
 plugins {
-    // 1. USE YOUR ORIGINAL LOOM VERSION HERE (e.g., '1.7-SNAPSHOT', '1.15.5', or whatever you had before)
-    id 'fabric-loom' version '1.15.5' 
-    
-    // 2. Add the Shadow plugin right below it
-    id 'com.github.johnrengelman.shadow' version '8.1.1'
+    id 'fabric-loom' version '1.15.5'
+    id 'com.gradleup.shadow' version '8.3.0' // The modern, maintained plugin
     id 'maven-publish'
 }
 
