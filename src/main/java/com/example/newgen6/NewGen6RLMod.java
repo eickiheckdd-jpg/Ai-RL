@@ -20,17 +20,13 @@ public class NewGen6RLMod implements ModInitializer {
             if (client.player == null || !RLConfig.agentEnabled) return;
 
             tickCounter++;
-            if (tickCounter % RLConfig.TICK_INTERVAL != 0) return; // Tick-skipping for mobile CPU
+            if (tickCounter % RLConfig.TICK_INTERVAL != 0) return;
 
-            // 1. Calculate simplified observation (Looking for closest target/mob)
             float[] obs = getPlayerObservations(client);
+            PPOAgent.InferenceResult action = PPOAgent.getInstance().predict(obs);
 
-            // 2. Predict actions with lightweight DL4J inference
-            float[] action = PPOAgent.getInstance().predict(obs);
-
-            // 3. Apply smooth camera rotation
-            client.player.setYaw(client.player.getYaw() + action[0]);
-            client.player.setPitch(client.player.getPitch() + action[1]);
+            client.player.setYaw(client.player.getYaw() + action.yawDelta);
+            client.player.setPitch(client.player.getPitch() + action.pitchDelta);
         });
     }
 
@@ -42,11 +38,11 @@ public class NewGen6RLMod implements ModInitializer {
         Entity target = null;
         double closestDist = 30.0;
 
-        // Find nearest entity in 30 block radius
         if (client.world != null) {
             for (Entity e : client.world.getEntities()) {
                 if (e != client.player && e.isAlive()) {
-                    double dist = pPos.distanceTo(e.getPos());
+                    Vec3d ePos = e.getPos();
+                    double dist = pPos.distanceTo(ePos);
                     if (dist < closestDist) {
                         closestDist = dist;
                         target = e;
