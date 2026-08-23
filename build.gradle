@@ -1,5 +1,8 @@
 plugins {
-    id 'fabric-loom' version '1.14' // Loom target for 1.21.11
+    // 1. USE YOUR ORIGINAL LOOM VERSION HERE (e.g., '1.7-SNAPSHOT', '1.15.5', or whatever you had before)
+    id 'fabric-loom' version '1.15.5' 
+    
+    // 2. Add the Shadow plugin right below it
     id 'com.github.johnrengelman.shadow' version '8.1.1'
     id 'maven-publish'
 }
@@ -9,12 +12,13 @@ repositories {
 }
 
 dependencies {
+    // Keep your original Minecraft & Fabric versions here!
     minecraft "com.mojang:minecraft:1.21.11"
     mappings "net.fabricmc:yarn:1.21.11+build.1:v2"
     modImplementation "net.fabricmc:fabric-loader:0.18.1"
     modImplementation "net.fabricmc.fabric-api:fabric-api:0.139.4+1.21.11"
 
-    // Shaded dependencies for DL4J/ND4J
+    // 3. Mark DeepLearning4J & ND4J dependencies for Shadowing
     implementation 'org.deeplearning4j:deeplearning4j-core:1.0.0-M2.1'
     implementation 'org.nd4j:nd4j-native-platform:1.0.0-M2.1'
 
@@ -22,10 +26,12 @@ dependencies {
     shadow 'org.nd4j:nd4j-native-platform:1.0.0-M2.1'
 }
 
+// 4. Configure Shadow task at the very bottom of the file
 shadowJar {
     configurations = [project.configurations.shadow]
     archiveClassifier = "shadow"
     
+    // Prevents metadata conflicts inside the shaded jar
     exclude "META-INF/*.SF"
     exclude "META-INF/*.DSA"
     exclude "META-INF/*.RSA"
