@@ -9,32 +9,17 @@ repositories {
 }
 
 dependencies {
-    // Keep your original Minecraft & Fabric versions here!
     minecraft "com.mojang:minecraft:1.21.11"
     mappings "net.fabricmc:yarn:1.21.11+build.1:v2"
     modImplementation "net.fabricmc:fabric-loader:0.18.1"
-    modImplementation "net.fabricmc.fabric-api:fabric-api:0.139.4+1.21.11"
+    modImplementation "net.fabricmc:fabric-api:fabric-api:0.139.4+1.21.11"
 
-    // 3. Mark DeepLearning4J & ND4J dependencies for Shadowing
+    // Use specific classifiers instead of "-platform" to avoid bloating the jar
     implementation 'org.deeplearning4j:deeplearning4j-core:1.0.0-M2.1'
-    implementation 'org.nd4j:nd4j-native-platform:1.0.0-M2.1'
+    implementation 'org.nd4j:nd4j-native:1.0.0-M2.1:linux-x86_64' // For GitHub Actions build machine
+    implementation 'org.nd4j:nd4j-native:1.0.0-M2.1:android-arm64'   // For PojavLauncher on your phone
 
     shadow 'org.deeplearning4j:deeplearning4j-core:1.0.0-M2.1'
-    shadow 'org.nd4j:nd4j-native-platform:1.0.0-M2.1'
-}
-
-// 4. Configure Shadow task at the very bottom of the file
-shadowJar {
-    configurations = [project.configurations.shadow]
-    archiveClassifier = "shadow"
-    
-    // Prevents metadata conflicts inside the shaded jar
-    exclude "META-INF/*.SF"
-    exclude "META-INF/*.DSA"
-    exclude "META-INF/*.RSA"
-}
-
-remapJar {
-    dependsOn shadowJar
-    inputFile = shadowJar.archiveFile
+    shadow 'org.nd4j:nd4j-native:1.0.0-M2.1:linux-x86_64'
+    shadow 'org.nd4j:nd4j-native:1.0.0-M2.1:android-arm64'
 }
