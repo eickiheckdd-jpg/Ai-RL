@@ -18,11 +18,9 @@ public class PPOAgent {
     private static PPOAgent instance;
     private ComputationGraph network;
 
-    // A Java 21 Record automatically generates the yawDelta() and pitchDelta() methods for you
     public record InferenceResult(float yawDelta, float pitchDelta) {}
 
     private PPOAgent() {
-        // Rebuilt as a ComputationGraph to satisfy PPOTrainerThread
         ComputationGraphConfiguration conf = new NeuralNetConfiguration.Builder()
                 .seed(12345)
                 .updater(new Adam(RLConfig.LEARNING_RATE))
