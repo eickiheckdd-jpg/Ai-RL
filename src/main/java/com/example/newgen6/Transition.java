@@ -1,21 +1,24 @@
 package com.example.newgen6;
 
 public class Transition {
-    public float[] state;
+    public final float[] state;
+    public final float[] nextState;
     public int action;
     public float reward;
-    public float[] nextState;
     public boolean done;
 
-    public Transition(float[] state, int action, float reward, float[] nextState, boolean done) {
-        set(state, action, reward, nextState, done);
+    // Pre-allocate memory once based on the locked state size (16 for your architecture)
+    public Transition(int stateSize) {
+        this.state = new float[stateSize];
+        this.nextState = new float[stateSize];
     }
 
     public void set(float[] state, int action, float reward, float[] nextState, boolean done) {
-        this.state = state.clone();
+        // Zero-allocation lightning copy
+        System.arraycopy(state, 0, this.state, 0, state.length);
+        System.arraycopy(nextState, 0, this.nextState, 0, nextState.length);
         this.action = action;
         this.reward = reward;
-        this.nextState = nextState.clone();
         this.done = done;
     }
 }
