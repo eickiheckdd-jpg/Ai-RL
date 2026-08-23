@@ -1,18 +1,18 @@
 package com.example.newgen6;
 
-import net.fabricmc.api.ModInitializer;
+import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.Entity;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-public class NewGen6RLMod implements ModInitializer {
+public class NewGen6RLMod implements ClientModInitializer {
     public static final Logger LOGGER = LoggerFactory.getLogger("newgen6");
     private static int tickCounter = 0;
 
     @Override
-    public void onInitialize() {
+    public void onInitializeClient() {
         LOGGER.info("Starting Mobile RL Agent...");
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -23,7 +23,7 @@ public class NewGen6RLMod implements ModInitializer {
 
             float[] obs = getPlayerObservations(client);
             PPOAgent.InferenceResult action = PPOAgent.getInstance().predict(obs);
-            
+
             // Route the result to your custom CombatActionExecutor
             CombatActionExecutor.execute(client.player, action);
         });
@@ -47,7 +47,7 @@ public class NewGen6RLMod implements ModInitializer {
                     double ex = e.getX();
                     double ey = e.getY();
                     double ez = e.getZ();
-                    
+
                     // Manual distance calculation
                     double dist = Math.sqrt(Math.pow(ex - px, 2) + Math.pow(ey - py, 2) + Math.pow(ez - pz, 2));
                     if (dist < closestDist) {
