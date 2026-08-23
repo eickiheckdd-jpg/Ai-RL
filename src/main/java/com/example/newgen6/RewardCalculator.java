@@ -11,7 +11,6 @@ public class RewardCalculator {
 
     private static final double OPTIMAL_DISTANCE = 2.8; // Ideal PvP sword range
     private static final double DISTANCE_SIGMA = 1.5;   // Spread of Gaussian distribution
-    private static final double GAMMA = 0.99;            // Discount factor for potential shaping
 
     public void reset(MinecraftClient client, LivingEntity target) {
         if (target != null) {
@@ -38,8 +37,6 @@ public class RewardCalculator {
         if (previousTargetHealth != -1.0f && currentTargetHealth < previousTargetHealth) {
             float damageDealt = previousTargetHealth - currentTargetHealth;
             float cooldownFactor = client.player.getAttackCooldownProgress(0.0f);
-            
-            // Reward damage scaled by weapon cooldown readiness
             reward += (damageDealt * 0.25f) * (0.5f + 0.5f * cooldownFactor);
         }
         previousTargetHealth = currentTargetHealth;
@@ -51,37 +48,52 @@ public class RewardCalculator {
         }
         previousPlayerHealth = currentPlayerHealth;
 
-        // --- 3. POTENTIAL-BASED REWARD SHAPING (PBRS) ---
+        // --- 3. FIXED POTENTIAL-BASED REWARD SHAPING ---
         double currentPotential = calculatePotential(client, target);
-        double shapingReward = (GAMMA * currentPotential) - previousPotential;
+        
+        // Pure state transition delta (gamma = 1.0 to prevent decay penalties)
+        double shapingReward = currentPotential - previousPotential;
         reward += (float) shapingReward;
         previousPotential = currentPotential;
+
+        // --- 4. DIRECT DENSE AIM INCENTIVE (Crucial for Curriculum Phase 1) ---
+        // Give a steady positive flow (+0.02 max per tick) for keeping crosshair centered
+        double alignment = getRawAlignment(client, target); // [0.0 to 1.0]
+        if (alignment > 0.8) { 
+            reward += (float) (alignment * 0.02); // Direct positive reward for holding good aim
+        }
 
         return reward;
     }
 
     /**
-     * Calculates state potential phi(s) based on 3D Aim Cosine Alignment and Gaussian Distance.
+     * Calculates state potential phi(s) strictly bounded between 0.0 and 1.0.
      */
     private double calculatePotential(MinecraftClient client, LivingEntity target) {
+        double cosineAlignment = getRawAlignment(client, target); // Bounded [0.0, 1.0]
+
         Vec3d playerEyePos = client.player.getEyePos();
         Vec3d targetCenter = target.getBoundingBox().getCenter();
-        
-        // Direction vector to target
-        Vec3d toTarget = targetCenter.subtract(playerEyePos);
-        double distance = toTarget.length();
-        Vec3d toTargetNormalized = toTarget.normalize();
+        double distance = targetCenter.subtract(playerEyePos).length();
 
-        // Player look vector
-        Vec3d lookVec = client.player.getRotationVec(1.0f).normalize();
-
-        // Cosine Alignment: dot product ranges from -1.0 (looking away) to 1.0 (dead center)
-        double cosineAlignment = lookVec.dotProduct(toTargetNormalized);
-
-        // Gaussian Distance Potential centered around OPTIMAL_DISTANCE (2.8 blocks)
+        // Gaussian Distance Potential [0.0, 1.0] centered around 2.8 blocks
         double distancePotential = Math.exp(-Math.pow(distance - OPTIMAL_DISTANCE, 2) / (2 * Math.pow(DISTANCE_SIGMA, 2)));
 
-        // Combine continuous orientation and positioning into potential phi(s)
-        return (0.6 * cosineAlignment) + (0.4 * distancePotential);
+        // Both components are strictly positive [0.0, 1.0]
+        return (0.7 * cosineAlignment) + (0.3 * distancePotential);
+    }
+
+    /**
+     * Helper to compute 3D Cosine Alignment normalized to range [0.0, 1.0].
+     * 1.0 = Dead Center Aim, 0.5 = 90 degrees away, 0.0 = Looking directly behind.
+     */
+    private double getRawAlignment(MinecraftClient client, LivingEntity target) {
+        Vec3d playerEyePos = client.player.getEyePos();
+        Vec3d targetCenter = target.getBoundingBox().getCenter();
+        Vec3d toTargetNormalized = targetCenter.subtract(playerEyePos).normalize();
+        Vec3d lookVec = client.player.getRotationVec(1.0f).normalize();
+
+        double dotProduct = lookVec.dotProduct(toTargetNormalized); // [-1.0, 1.0]
+        return (dotProduct + 1.0) / 2.0; // Normalized to [0.0, 1.0]
     }
 }
