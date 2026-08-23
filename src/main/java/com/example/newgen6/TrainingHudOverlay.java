@@ -3,6 +3,7 @@ package com.example.newgen6;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.render.RenderTickCounter; // Required update for modern Fabric API
 
 public class TrainingHudOverlay implements HudRenderCallback {
     // 0 = Off, 1 = Mode 1 (Basic Telemetry), 2 = Mode 2 (Advanced Telemetry + Actions)
@@ -28,7 +29,7 @@ public class TrainingHudOverlay implements HudRenderCallback {
     }
 
     @Override
-    public void onHudRender(DrawContext drawContext, float tickDelta) {
+    public void onHudRender(DrawContext drawContext, RenderTickCounter tickCounter) {
         if (hudMode == 0) return; // HUD is OFF
 
         MinecraftClient client = MinecraftClient.getInstance();
