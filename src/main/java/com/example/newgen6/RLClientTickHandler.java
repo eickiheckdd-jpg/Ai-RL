@@ -61,7 +61,7 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
         }
         cKeyWasPressed = cPressed;
 
-        // Toggle HUD Key (X)
+        // Toggle HUD Key (X - 3-State Cycle)
         boolean xPressed = InputUtil.isKeyPressed(client.getWindow(), GLFW.GLFW_KEY_X);
         if (xPressed && !xKeyWasPressed) {
             hudOverlay.toggle();
@@ -97,17 +97,17 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
             if (done) {
                 previousState = null;
                 previousAction = null;
-                agent.resetNoise(); // ADDED: Reset the drift when a fight ends
+                agent.resetNoise();
                 resetHumanInputs(client);
                 rewardCalculator.reset(client, target);
                 return;
             }
         }
 
-        // Select continuous action array
+        // Select continuous action array from Actor Network
         float[] actionVector = agent.selectAction(currentState, evaluationMode);
 
-        // Execute smooth movement and aim
+        // Execute smooth movement, aim, and combat input
         ContinuousCombatController.execute(client, actionVector);
 
         previousState = currentState;
