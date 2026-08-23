@@ -76,7 +76,7 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
         if (previousState != null && previousAction != null) {
             float reward = rewardCalculator.calculateReward(client, target);
             this.lastReward = reward;
-            if (reward > 0) totalDamageDealt += reward * 10.0; // Estimate net damage from rewards
+            if (reward > 0) totalDamageDealt += reward * 10.0; 
 
             boolean done = client.player.isDead() || (target != null && target.isDead());
 
@@ -97,6 +97,7 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
             if (done) {
                 previousState = null;
                 previousAction = null;
+                agent.resetNoise(); // ADDED: Reset the drift when a fight ends
                 resetHumanInputs(client);
                 rewardCalculator.reset(client, target);
                 return;
