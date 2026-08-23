@@ -16,7 +16,7 @@ public class ContinuousCombatController {
         client.options.rightKey.setPressed(actionVector[3] > 0.2f);
         client.options.leftKey.setPressed(actionVector[3] < -0.2f);
         
-        client.options.attackKey.setPressed(actionVector[4] > 0.5f);
+        client.options.attackKey.setPressed(actionVector[4] > 0.3f);
         client.options.jumpKey.setPressed(actionVector[4] > 0.8f);
     }
 }
