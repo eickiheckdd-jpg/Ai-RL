@@ -5,6 +5,7 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.MathHelper; // Fixed import for angle wrapping
 import org.lwjgl.glfw.GLFW;
 
 import java.io.File;
@@ -50,26 +51,26 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
 
     public RLClientTickHandler(TrainingHudOverlay hudOverlay) {
         this.hudOverlay = hudOverlay;
-        
+
         // Locked strictly to 16 inputs to safeguard .bin compatibility
         this.agent = new DoubleDQNAgent(16, CombatAction.values().length);
 
         File runDir = MinecraftClient.getInstance().runDirectory;
         this.modelFile = new File(runDir, "pvp_rl_model.bin");
         this.bestModelFile = new File(runDir, "best_pvp_model.bin");
-        
+
         this.snapshotDir = new File(runDir, "champion_snapshots");
         if (!snapshotDir.exists()) {
             snapshotDir.mkdirs();
         }
 
-        // Load champion brain if available, else standard model
+        // Updated to use ModelSerializer.loadModel to match ModelSerializer.java
         if (bestModelFile.exists()) {
             System.out.println("[Newgen6] 🧠 Loading champion brain: best_pvp_model.bin");
-            ModelSerializer.loadAgent(agent, bestModelFile);
+            ModelSerializer.loadModel(agent, bestModelFile.getAbsolutePath());
         } else if (modelFile.exists()) {
             System.out.println("[Newgen6] 📁 Loading standard model: pvp_rl_model.bin");
-            ModelSerializer.loadAgent(agent, modelFile);
+            ModelSerializer.loadModel(agent, modelFile.getAbsolutePath());
         } else {
             System.out.println("[Newgen6] ⚠️ No weights found. Initializing fresh network.");
         }
@@ -107,7 +108,7 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
         // Target & Perception processing
         LivingEntity target = targetSelector.findBestTarget(client);
         float[] rawState = PerceptionSystem.getObservation(client, target);
-        
+
         // Phase 3: Temporal memory smoothing
         float[] currentState = processTemporalMemoryState(rawState);
         float aimAlignment = currentState[8]; 
@@ -192,7 +193,7 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
         tickCounter++;
 
         if (tickCounter % 1000 == 0 && !evaluationMode) {
-            trainingExecutor.submit(() -> ModelSerializer.saveAgent(agent, modelFile));
+            trainingExecutor.submit(() -> ModelSerializer.saveModel(agent, modelFile.getAbsolutePath()));
         }
     }
 
@@ -246,7 +247,8 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
         float currentYaw = client.player.getYaw();
         float currentPitch = client.player.getPitch();
 
-        float yawDelta = Math.wrapDegrees(targetYaw - currentYaw);
+        // Fixed to use MathHelper correctly
+        float yawDelta = MathHelper.wrapDegrees(targetYaw - currentYaw);
         float pitchDelta = targetPitch - currentPitch;
 
         double f = client.options.getMouseSensitivity().getValue() * 0.6 + 0.2;
@@ -280,8 +282,8 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
 
             trainingExecutor.submit(() -> {
                 try {
-                    ModelSerializer.saveAgent(agent, bestModelFile);
-                    ModelSerializer.saveAgent(agent, snapshotFile);
+                    ModelSerializer.saveModel(agent, bestModelFile.getAbsolutePath());
+                    ModelSerializer.saveModel(agent, snapshotFile.getAbsolutePath());
                     System.out.println("[Newgen6] ⚔️ New Champion Record: " + bestNetDamage + "! Saved " + snapshotFile.getName());
                 } catch (Exception e) {
                     e.printStackTrace();
@@ -290,14 +292,14 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
         } else if (netDamage < bestNetDamage - 5.0) {
             System.out.println("[Newgen6] 📉 Performance dropped. Restoring brain...");
             File[] snapshots = snapshotDir.listFiles((dir, name) -> name.endsWith(".bin"));
-            
+
             if (snapshots != null && snapshots.length > 0 && random.nextFloat() < 0.30f) {
                 File randomSnapshot = snapshots[random.nextInt(snapshots.length)];
                 System.out.println("[Newgen6] 🎲 Restoring snapshot for diversity: " + randomSnapshot.getName());
-                ModelSerializer.loadAgent(agent, randomSnapshot);
+                ModelSerializer.loadModel(agent, randomSnapshot.getAbsolutePath());
             } else if (bestModelFile.exists()) {
                 System.out.println("[Newgen6] 🔄 Restoring main champion: best_pvp_model.bin");
-                ModelSerializer.loadAgent(agent, bestModelFile);
+                ModelSerializer.loadModel(agent, bestModelFile.getAbsolutePath());
             }
         } else {
             System.out.println("[Newgen6] ⚖️ Performance steady. Net Damage: " + netDamage);
