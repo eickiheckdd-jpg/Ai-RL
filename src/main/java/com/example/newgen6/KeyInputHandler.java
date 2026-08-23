@@ -4,25 +4,28 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.text.Text;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
 public class KeyInputHandler {
     private static KeyBinding toggleAgentKey;
     private static KeyBinding toggleHudKey;
 
+    // 1. Create the new Category object using an Identifier
+    public static final KeyBinding.Category RL_CATEGORY = KeyBinding.Category.create(Identifier.of("newgen6", "rl"));
+
     public static void register() {
-        // Fix: Dropped InputUtil.Type.KEYSYM to use the simplified 3-arg constructor 
-        // which prevents the Category type-casting error in 1.21 mappings.
+        
         toggleAgentKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.newgen6.toggle_agent",
             GLFW.GLFW_KEY_C,
-            "category.newgen6.rl"
+            RL_CATEGORY // 2. Pass the Category object instead of the String
         ));
 
         toggleHudKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.newgen6.toggle_hud",
             GLFW.GLFW_KEY_X,
-            "category.newgen6.rl"
+            RL_CATEGORY // 2. Pass the Category object instead of the String
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
