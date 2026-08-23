@@ -10,22 +10,16 @@ import org.lwjgl.glfw.GLFW;
 public class KeyInputHandler {
     private static KeyBinding toggleAgentKey;
     private static KeyBinding toggleHudKey;
-
-    // 1. Create the new Category object using an Identifier
+    
     public static final KeyBinding.Category RL_CATEGORY = KeyBinding.Category.create(Identifier.of("newgen6", "rl"));
 
     public static void register() {
-        
         toggleAgentKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-            "key.newgen6.toggle_agent",
-            GLFW.GLFW_KEY_C,
-            RL_CATEGORY // 2. Pass the Category object instead of the String
+            "key.newgen6.toggle_agent", GLFW.GLFW_KEY_C, RL_CATEGORY
         ));
 
         toggleHudKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-            "key.newgen6.toggle_hud",
-            GLFW.GLFW_KEY_X,
-            RL_CATEGORY // 2. Pass the Category object instead of the String
+            "key.newgen6.toggle_hud", GLFW.GLFW_KEY_X, RL_CATEGORY
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
@@ -35,7 +29,6 @@ public class KeyInputHandler {
                     client.player.sendMessage(Text.literal("RL Agent: " + (RLConfig.agentEnabled ? "§aENABLED" : "§cDISABLED")), true);
                 }
             }
-
             while (toggleHudKey.wasPressed()) {
                 RLConfig.showDebugHud = !RLConfig.showDebugHud;
                 if (client.player != null) {
