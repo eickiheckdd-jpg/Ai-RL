@@ -66,20 +66,34 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
             CombatAction prevAct = CombatAction.values()[previousAction];
             boolean wasInvalid = false;
             boolean wasUnnecessaryJump = false;
+            boolean wasValidAttack = false;
+            boolean wasCrit = false;
 
-            // Flag attack inputs executed without looking at an entity target as invalid
+            // Attack Evaluation (Spam prevention & Crit detection)
             if (prevAct == CombatAction.ATTACK_SPAM || prevAct == CombatAction.ATTACK_TIMED_SWEEP || prevAct == CombatAction.ATTACK_SPRINT) {
                 if (client.crosshairTarget == null || client.crosshairTarget.getType() != HitResult.Type.ENTITY) {
-                    wasInvalid = true;
+                    wasInvalid = true; // Swung at air
+                } else {
+                    float cooldown = client.player.getAttackCooldownProgress(0.0f);
+                    if (cooldown >= 0.85f) {
+                        wasValidAttack = true; // Swing was fully charged and on target
+                        
+                        // Check if falling (crit condition in Minecraft)
+                        if (!client.player.isOnGround() && client.player.getVelocity().y < 0.0) {
+                            wasCrit = true; // The bot executed a perfect jump-crit
+                        }
+                    } else {
+                        wasInvalid = true; // Spammed click while on cooldown
+                    }
                 }
             }
 
-            // Penalize jumping if crosshair is not aligned or target is distant/missing
+            // Jump Evaluation
             if (prevAct == CombatAction.JUMP && (target == null || aimAlignment > 0.3f)) {
                 wasUnnecessaryJump = true;
             }
 
-            float reward = rewardCalculator.calculateReward(client, target, wasInvalid, wasUnnecessaryJump, aimAlignment);
+            float reward = rewardCalculator.calculateReward(client, target, wasInvalid, wasUnnecessaryJump, wasValidAttack, wasCrit, aimAlignment);
             boolean done = client.player.isDead() || (target != null && target.isDead());
 
             agent.addExperience(previousState, previousAction, reward, currentState, done);
