@@ -14,6 +14,9 @@ public class NewGen6RLMod implements ClientModInitializer {
     @Override
     public void onInitializeClient() {
         LOGGER.info("Starting Mobile RL Agent...");
+        
+        // This makes your C and X keys work!
+        KeyInputHandler.register();
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             if (client.player == null || !RLConfig.agentEnabled) return;
@@ -24,7 +27,6 @@ public class NewGen6RLMod implements ClientModInitializer {
             float[] obs = getPlayerObservations(client);
             PPOAgent.InferenceResult action = PPOAgent.getInstance().predict(obs);
 
-            // Route the result to your custom CombatActionExecutor
             CombatActionExecutor.execute(client.player, action);
         });
     }
@@ -33,7 +35,6 @@ public class NewGen6RLMod implements ClientModInitializer {
         float[] obs = new float[RLConfig.OBS_DIM];
         if (client.player == null) return obs;
 
-        // Direct coordinate access avoids all Yarn mapping getPos() conflicts
         double px = client.player.getX();
         double py = client.player.getY();
         double pz = client.player.getZ();
@@ -48,7 +49,6 @@ public class NewGen6RLMod implements ClientModInitializer {
                     double ey = e.getY();
                     double ez = e.getZ();
 
-                    // Manual distance calculation
                     double dist = Math.sqrt(Math.pow(ex - px, 2) + Math.pow(ey - py, 2) + Math.pow(ez - pz, 2));
                     if (dist < closestDist) {
                         closestDist = dist;
