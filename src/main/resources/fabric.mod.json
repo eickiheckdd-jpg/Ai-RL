@@ -8,17 +8,14 @@
     "NewGen6"
   ],
   "environment": "client",
- "entrypoints": {
-    "main": [
-        "com.example.newgen6.NewGen6RLMod"
-    ],
+  "entrypoints": {
     "client": [
-        "com.example.newgen6.Newgen6Client"
+      "com.example.newgen6.NewGen6RLMod"
     ]
-}
+  },
   "depends": {
     "fabricloader": ">=0.18.0",
-    "minecraft": "~1.21.11",
+    "minecraft": "~1.21.1",
     "fabric-api": "*"
   }
 }
