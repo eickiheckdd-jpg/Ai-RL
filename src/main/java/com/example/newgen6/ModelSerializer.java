@@ -6,15 +6,12 @@ public class ModelSerializer {
 
     public static void saveModel(DoubleDQNAgent agent, String filepath) {
         try (DataOutputStream dos = new DataOutputStream(new FileOutputStream(filepath))) {
-            // Save the epsilon and training step count
             dos.writeFloat(agent.getEpsilon());
             dos.writeInt(agent.getTrainingStepCount());
 
-            // Save weights and biases from the main qNetwork
             float[][] weights = agent.qNetwork.getWeights();
             float[][] biases = agent.qNetwork.getBiases();
 
-            // Write lengths for dynamic reconstruction if needed
             dos.writeInt(weights.length);
             for (int i = 0; i < weights.length; i++) {
                 dos.writeInt(weights[i].length);
@@ -45,25 +42,36 @@ public class ModelSerializer {
             float[][] biases = agent.qNetwork.getBiases();
 
             int numLayers = dis.readInt();
+            if (numLayers != weights.length) {
+                System.err.println("[Newgen6] ⚠️ Model architecture mismatch! Discarding old weights.");
+                return false;
+            }
+
             for (int i = 0; i < numLayers; i++) {
                 int wLen = dis.readInt();
+                if (wLen != weights[i].length) {
+                    System.err.println("[Newgen6] ⚠️ Weight array size mismatch! Discarding old weights.");
+                    return false;
+                }
                 for (int j = 0; j < wLen; j++) {
                     weights[i][j] = dis.readFloat();
                 }
                 
                 int bLen = dis.readInt();
+                if (bLen != biases[i].length) {
+                    System.err.println("[Newgen6] ⚠️ Bias array size mismatch! Discarding old weights.");
+                    return false;
+                }
                 for (int j = 0; j < bLen; j++) {
                     biases[i][j] = dis.readFloat();
                 }
             }
             
-            // Sync the target network with the loaded weights
             agent.targetNetwork.copyWeightsFrom(agent.qNetwork);
-            
             System.out.println("[Newgen6] Model loaded successfully from " + filepath);
             return true;
-        } catch (IOException e) {
-            System.err.println("[Newgen6] Failed to load model: " + e.getMessage());
+        } catch (Exception e) {
+            System.err.println("[Newgen6] Failed to load model (corrupt or outdated format): " + e.getMessage());
             return false;
         }
     }
