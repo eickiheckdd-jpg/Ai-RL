@@ -3,76 +3,43 @@ package com.example.newgen6;
 import java.io.*;
 
 public class ModelSerializer {
-
-    public static void saveModel(DoubleDQNAgent agent, String filepath) {
-        try (DataOutputStream dos = new DataOutputStream(new FileOutputStream(filepath))) {
-            dos.writeFloat(agent.getEpsilon());
-            dos.writeInt(agent.getTrainingStepCount());
-
-            float[][] weights = agent.qNetwork.getWeights();
-            float[][] biases = agent.qNetwork.getBiases();
-
-            dos.writeInt(weights.length);
-            for (int i = 0; i < weights.length; i++) {
-                dos.writeInt(weights[i].length);
-                for (int j = 0; j < weights[i].length; j++) {
-                    dos.writeFloat(weights[i][j]);
-                }
-                
-                dos.writeInt(biases[i].length);
-                for (int j = 0; j < biases[i].length; j++) {
-                    dos.writeFloat(biases[i][j]);
-                }
-            }
-            System.out.println("[Newgen6] Model saved successfully to " + filepath);
+    
+    public static void saveModel(DDPGAgent agent, String filepath) {
+        try (DataOutputStream dos = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(filepath)))) {
+            writeNetwork(dos, agent.actor.w1, agent.actor.b1, agent.actor.w2, agent.actor.b2);
+            writeNetwork(dos, agent.critic.w1, agent.critic.b1, agent.critic.w2, agent.critic.b2);
         } catch (IOException e) {
-            System.err.println("[Newgen6] Failed to save model: " + e.getMessage());
+            e.printStackTrace();
         }
     }
 
-    public static boolean loadModel(DoubleDQNAgent agent, String filepath) {
+    public static void loadModel(DDPGAgent agent, String filepath) {
         File file = new File(filepath);
-        if (!file.exists()) return false;
+        if (!file.exists()) return;
 
-        try (DataInputStream dis = new DataInputStream(new FileInputStream(filepath))) {
-            agent.setEpsilon(dis.readFloat());
-            agent.setTrainingStepCount(dis.readInt());
-
-            float[][] weights = agent.qNetwork.getWeights();
-            float[][] biases = agent.qNetwork.getBiases();
-
-            int numLayers = dis.readInt();
-            if (numLayers != weights.length) {
-                System.err.println("[Newgen6] ⚠️ Model architecture mismatch! Discarding old weights.");
-                return false;
-            }
-
-            for (int i = 0; i < numLayers; i++) {
-                int wLen = dis.readInt();
-                if (wLen != weights[i].length) {
-                    System.err.println("[Newgen6] ⚠️ Weight array size mismatch! Discarding old weights.");
-                    return false;
-                }
-                for (int j = 0; j < wLen; j++) {
-                    weights[i][j] = dis.readFloat();
-                }
-                
-                int bLen = dis.readInt();
-                if (bLen != biases[i].length) {
-                    System.err.println("[Newgen6] ⚠️ Bias array size mismatch! Discarding old weights.");
-                    return false;
-                }
-                for (int j = 0; j < bLen; j++) {
-                    biases[i][j] = dis.readFloat();
-                }
-            }
+        try (DataInputStream dis = new DataInputStream(new BufferedInputStream(new FileInputStream(filepath)))) {
+            readNetwork(dis, agent.actor.w1, agent.actor.b1, agent.actor.w2, agent.actor.b2);
+            readNetwork(dis, agent.critic.w1, agent.critic.b1, agent.critic.w2, agent.critic.b2);
             
-            agent.targetNetwork.copyWeightsFrom(agent.qNetwork);
-            System.out.println("[Newgen6] Model loaded successfully from " + filepath);
-            return true;
-        } catch (Exception e) {
-            System.err.println("[Newgen6] Failed to load model (corrupt or outdated format): " + e.getMessage());
-            return false;
+            // Hard copy to target networks
+            System.arraycopy(agent.actor.w1, 0, agent.targetActor.w1, 0, agent.actor.w1.length);
+            System.arraycopy(agent.critic.w1, 0, agent.targetCritic.w1, 0, agent.critic.w1.length);
+        } catch (IOException e) {
+            e.printStackTrace();
         }
+    }
+
+    private static void writeNetwork(DataOutputStream dos, float[] w1, float[] b1, float[] w2, float[] b2) throws IOException {
+        for (float v : w1) dos.writeFloat(v);
+        for (float v : b1) dos.writeFloat(v);
+        for (float v : w2) dos.writeFloat(v);
+        for (float v : b2) dos.writeFloat(v);
+    }
+
+    private static void readNetwork(DataInputStream dis, float[] w1, float[] b1, float[] w2, float[] b2) throws IOException {
+        for (int i = 0; i < w1.length; i++) w1[i] = dis.readFloat();
+        for (int i = 0; i < b1.length; i++) b1[i] = dis.readFloat();
+        for (int i = 0; i < w2.length; i++) w2[i] = dis.readFloat();
+        for (int i = 0; i < b2.length; i++) b2[i] = dis.readFloat();
     }
 }
