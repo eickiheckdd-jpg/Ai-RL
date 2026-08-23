@@ -18,8 +18,17 @@ public class PPOAgent {
     private static PPOAgent instance;
     private MultiLayerNetwork network;
 
+    public static class InferenceResult {
+        public float yawDelta;
+        public float pitchDelta;
+
+        public InferenceResult(float yawDelta, float pitchDelta) {
+            this.yawDelta = yawDelta;
+            this.pitchDelta = pitchDelta;
+        }
+    }
+
     private PPOAgent() {
-        // Enable workspace memory reuse explicitly for mobile
         MultiLayerConfiguration conf = new NeuralNetConfiguration.Builder()
                 .seed(12345)
                 .updater(new Adam(RLConfig.LEARNING_RATE))
@@ -28,7 +37,7 @@ public class PPOAgent {
                 .list()
                 .layer(0, new DenseLayer.Builder()
                         .nIn(RLConfig.OBS_DIM)
-                        .nOut(16) // Minimal neuron count for 1.5GB RAM
+                        .nOut(16)
                         .activation(Activation.RELU)
                         .weightInit(WeightInit.XAVIER)
                         .build())
@@ -51,18 +60,22 @@ public class PPOAgent {
         return instance;
     }
 
-    public float[] predict(float[] obs) {
-        float[] actions = new float[RLConfig.ACTION_CONTINUOUS_DIM];
+    public MultiLayerNetwork getNetwork() {
+        return network;
+    }
+
+    public InferenceResult predict(float[] obs) {
+        float yaw = 0f;
+        float pitch = 0f;
         
-        // Wrap array creation inside an explicit ND4J Workspace to prevent memory leaks
         try (MemoryWorkspace ws = Nd4j.getWorkspaceManager().getAndActivateWorkspace("MOBILE_AI_INFERENCE")) {
             INDArray input = Nd4j.create(obs).reshape(1, RLConfig.OBS_DIM);
             INDArray output = network.output(input, false);
             
-            actions[0] = output.getFloat(0, 0) * RLConfig.MAX_YAW_DELTA;
-            actions[1] = output.getFloat(0, 1) * RLConfig.MAX_PITCH_DELTA;
+            yaw = output.getFloat(0, 0) * RLConfig.MAX_YAW_DELTA;
+            pitch = output.getFloat(0, 1) * RLConfig.MAX_PITCH_DELTA;
         }
         
-        return actions;
+        return new InferenceResult(yaw, pitch);
     }
 }
