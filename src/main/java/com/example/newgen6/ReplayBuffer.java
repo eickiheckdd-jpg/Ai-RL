@@ -9,18 +9,20 @@ public class ReplayBuffer {
     private int size = 0;
     private final Random random = new Random();
 
-    public ReplayBuffer(int capacity) {
+    public ReplayBuffer(int capacity, int stateSize) {
         this.capacity = capacity;
         this.buffer = new Transition[capacity];
+        
+        // Pre-fill the buffer with empty transition objects to prevent GC spikes later
+        for (int i = 0; i < capacity; i++) {
+            this.buffer[i] = new Transition(stateSize);
+        }
     }
 
     public synchronized void add(float[] state, int action, float reward, float[] nextState, boolean done) {
-        if (buffer[head] == null) {
-            buffer[head] = new Transition(state, action, reward, nextState, done);
-        } else {
-            buffer[head].set(state, action, reward, nextState, done);
-        }
-
+        // Overwrite existing memory instead of creating new objects
+        buffer[head].set(state, action, reward, nextState, done);
+        
         head = (head + 1) % capacity;
         if (size < capacity) size++;
     }
@@ -34,12 +36,12 @@ public class ReplayBuffer {
         return batch;
     }
 
-    public synchronized int size() {
-        return size;
+    public synchronized int size() { 
+        return size; 
     }
 
-    public synchronized void clear() {
-        head = 0;
-        size = 0;
+    public synchronized void clear() { 
+        head = 0; 
+        size = 0; 
     }
 }
