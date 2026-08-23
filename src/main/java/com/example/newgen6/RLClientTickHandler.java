@@ -26,22 +26,25 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
     private boolean botEnabled = true;
     private int tickCounter = 0;
 
+    private double totalDamageDealt = 0.0;
+    private float lastReward = 0.0f;
+
     private final File modelFile;
     private boolean cKeyWasPressed = false;
     private boolean xKeyWasPressed = false;
 
     public RLClientTickHandler(TrainingHudOverlay hudOverlay) {
         this.hudOverlay = hudOverlay;
-        this.agent = new DDPGAgent(16); // 16 state inputs
+        this.agent = new DDPGAgent(16);
 
         File runDir = MinecraftClient.getInstance().runDirectory;
         this.modelFile = new File(runDir, "ddpg_pvp_model.bin");
 
         if (modelFile.exists()) {
-            System.out.println("[Newgen6] 🧠 Loading continuous DDPG model...");
+            System.out.println("[Newgen6] Loading continuous DDPG model...");
             ModelSerializer.loadModel(agent, modelFile.getAbsolutePath());
         } else {
-            System.out.println("[Newgen6] ⚠️ No continuous weights found. Initializing fresh DDPG network.");
+            System.out.println("[Newgen6] No continuous weights found. Initializing fresh DDPG network.");
         }
     }
 
@@ -72,6 +75,9 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
 
         if (previousState != null && previousAction != null) {
             float reward = rewardCalculator.calculateReward(client, target);
+            this.lastReward = reward;
+            if (reward > 0) totalDamageDealt += reward * 10.0; // Estimate net damage from rewards
+
             boolean done = client.player.isDead() || (target != null && target.isDead());
 
             agent.addExperience(previousState, previousAction, reward, currentState, done);
@@ -97,15 +103,18 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
             }
         }
 
-        // Select continuous action array [yaw_delta, pitch_delta, forward, strafe, trigger]
+        // Select continuous action array
         float[] actionVector = agent.selectAction(currentState, evaluationMode);
-        
+
         // Execute smooth movement and aim
         ContinuousCombatController.execute(client, actionVector);
 
         previousState = currentState;
         previousAction = actionVector;
         tickCounter++;
+
+        // Stream live telemetry directly to HUD
+        hudOverlay.updateMetrics(lastReward, totalDamageDealt, agent.getMemorySize(), actionVector);
 
         // Periodic auto-save every 1000 ticks
         if (tickCounter % 1000 == 0 && !evaluationMode) {
