@@ -5,7 +5,6 @@ import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.hit.HitResult;
-import net.minecraft.util.math.MathHelper; // Fixed import for angle wrapping
 import org.lwjgl.glfw.GLFW;
 
 import java.io.File;
@@ -24,14 +23,12 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
     private final ExecutorService trainingExecutor = Executors.newSingleThreadExecutor();
     private final AtomicBoolean isTraining = new AtomicBoolean(false);
 
-    // Operational State
     private float[] previousState = null;
     private int previousAction = 0;
     private boolean evaluationMode = false;
     private boolean botEnabled = true;
     private int tickCounter = 0;
 
-    // Phase 2: Population Pooling & Metrics
     private final File modelFile;
     private final File bestModelFile;
     private final File snapshotDir;
@@ -42,7 +39,6 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
     private double damageTakenInWindow = 0.0;
     private int windowTicks = 0;
 
-    // Phase 3: Rolling Temporal Memory Buffer (5-tick window, maintains 16-float contract)
     private static final int MEMORY_WINDOW_SIZE = 5;
     private final LinkedList<float[]> temporalMemoryQueue = new LinkedList<>();
 
@@ -52,7 +48,7 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
     public RLClientTickHandler(TrainingHudOverlay hudOverlay) {
         this.hudOverlay = hudOverlay;
 
-        // Locked strictly to 16 inputs to safeguard .bin compatibility
+        // Neural network size automatically adapts to the new CombatAction enum length (9)
         this.agent = new DoubleDQNAgent(16, CombatAction.values().length);
 
         File runDir = MinecraftClient.getInstance().runDirectory;
@@ -60,11 +56,8 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
         this.bestModelFile = new File(runDir, "best_pvp_model.bin");
 
         this.snapshotDir = new File(runDir, "champion_snapshots");
-        if (!snapshotDir.exists()) {
-            snapshotDir.mkdirs();
-        }
+        if (!snapshotDir.exists()) snapshotDir.mkdirs();
 
-        // Updated to use ModelSerializer.loadModel to match ModelSerializer.java
         if (bestModelFile.exists()) {
             System.out.println("[Newgen6] 🧠 Loading champion brain: best_pvp_model.bin");
             ModelSerializer.loadModel(agent, bestModelFile.getAbsolutePath());
@@ -88,7 +81,6 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
     public void onEndTick(MinecraftClient client) {
         if (client.player == null || client.world == null || client.isPaused()) return;
 
-        // Keybindings: C = Toggle Bot, X = Toggle HUD
         boolean cPressed = InputUtil.isKeyPressed(client.getWindow(), GLFW.GLFW_KEY_C);
         if (cPressed && !cKeyWasPressed) {
             botEnabled = !botEnabled;
@@ -105,11 +97,8 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
 
         if (!botEnabled) return;
 
-        // Target & Perception processing
         LivingEntity target = targetSelector.findBestTarget(client);
         float[] rawState = PerceptionSystem.getObservation(client, target);
-
-        // Phase 3: Temporal memory smoothing
         float[] currentState = processTemporalMemoryState(rawState);
         float aimAlignment = currentState[8]; 
 
@@ -120,8 +109,7 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
             boolean wasValidAttack = false;
             boolean wasCrit = false;
 
-            // Attack Evaluation (Spam prevention & Crit detection)
-            if (prevAct == CombatAction.ATTACK_SPAM || prevAct == CombatAction.ATTACK_TIMED_SWEEP || prevAct == CombatAction.ATTACK_SPRINT) {
+            if (prevAct == CombatAction.ATTACK) {
                 if (client.crosshairTarget == null || client.crosshairTarget.getType() != HitResult.Type.ENTITY) {
                     wasInvalid = true; 
                 } else {
@@ -137,7 +125,6 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
                 }
             }
 
-            // Jump Evaluation
             if (prevAct == CombatAction.JUMP && (target == null || aimAlignment > 0.3f)) {
                 wasUnnecessaryJump = true;
             }
@@ -159,7 +146,6 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
                 }
             }
 
-            // Phase 2: Evaluation Window (5,000 ticks)
             windowTicks++;
             if (windowTicks >= 5000 && !evaluationMode) {
                 evaluateAndManageBrain();
@@ -185,8 +171,13 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
         int actionIndex = agent.selectAction(currentState, evaluationMode);
         CombatAction action = CombatAction.values()[actionIndex];
 
+        // Wipe inputs from the previous tick so the AI has to continuously "hold" buttons
         resetHumanInputs(client);
-        executeHumanizedAction(client, action, target);
+        
+        // Execute the single chosen action directly
+        if (client.player != null) {
+            action.execute(client);
+        }
 
         previousState = currentState;
         previousAction = actionIndex;
@@ -214,51 +205,6 @@ public class RLClientTickHandler implements ClientTickEvents.EndTick {
             memoryState[i] = (rawState[i] * 0.70f) + ((sum / sampleCount) * 0.30f);
         }
         return memoryState;
-    }
-
-    private void executeHumanizedAction(MinecraftClient client, CombatAction action, LivingEntity target) {
-        if (client.player == null) return;
-
-        action.execute(client);
-
-        double distanceToTarget = target != null ? client.player.distanceTo(target) : 999.0;
-        if (client.options.forwardKey.isPressed()) {
-            if (distanceToTarget > 2.2 && !client.player.isSprinting() && client.player.getHungerManager().getFoodLevel() > 6) {
-                client.player.setSprinting(true);
-            }
-        }
-
-        if (target != null) {
-            applyHumanizedAimSmoothing(client, target);
-        }
-    }
-
-    private void applyHumanizedAimSmoothing(MinecraftClient client, LivingEntity target) {
-        if (client.player == null || target == null) return;
-
-        double dx = target.getX() - client.player.getX();
-        double dy = (target.getY() + target.getStandingEyeHeight()) - (client.player.getY() + client.player.getEyeHeight(client.player.getPose()));
-        double dz = target.getZ() - client.player.getZ();
-        double distXZ = Math.sqrt(dx * dx + dz * dz);
-
-        float targetYaw = (float) Math.toDegrees(-Math.atan2(dx, dz));
-        float targetPitch = (float) Math.toDegrees(-Math.atan2(dy, distXZ));
-
-        float currentYaw = client.player.getYaw();
-        float currentPitch = client.player.getPitch();
-
-        // Fixed to use MathHelper correctly
-        float yawDelta = MathHelper.wrapDegrees(targetYaw - currentYaw);
-        float pitchDelta = targetPitch - currentPitch;
-
-        double f = client.options.getMouseSensitivity().getValue() * 0.6 + 0.2;
-        double gcd = f * f * f * 8.0 * 0.15;
-
-        float smoothYaw = (float) (currentYaw + Math.round(yawDelta * 0.35f / gcd) * gcd);
-        float smoothPitch = (float) (currentPitch + Math.round(pitchDelta * 0.35f / gcd) * gcd);
-
-        client.player.setYaw(smoothYaw);
-        client.player.setPitch(Math.max(-90.0f, Math.min(90.0f, smoothPitch)));
     }
 
     private void resetHumanInputs(MinecraftClient client) {
