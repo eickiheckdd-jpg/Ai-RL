@@ -7,7 +7,7 @@ import net.minecraft.client.render.RenderTickCounter;
 
 public class TrainingHudOverlay implements HudRenderCallback {
     private int hudMode = 1;
-    
+
     private float currentReward = 0.0f;
     private double bestNetDamage = 0.0;
     private int bufferSize = 0;
@@ -38,29 +38,29 @@ public class TrainingHudOverlay implements HudRenderCallback {
 
         if (hudMode == 1) {
             // --- MODE 1: Basic Telemetry ---
-            // Draw background box using ARGB int (Fully opaque dark box to test visibility)
             drawContext.fill(x - 6, y - 6, x + 210, y + 72, 0xC0000000);
 
-            drawContext.drawText(client.textRenderer, "Newgen6 DDPG - Mode 1", x, y, 0xFFA500, false);
-            drawContext.drawText(client.textRenderer, "Bot Status: ACTIVE", x, y + 14, 0x55FF55, false);
-            drawContext.drawText(client.textRenderer, "Replay Memory: " + bufferSize + " / 10000", x, y + 28, 0xFFFF55, false);
-            drawContext.drawText(client.textRenderer, String.format("Last Reward: %.2f", currentReward), x, y + 42, 0xFFFFFF, false);
-            drawContext.drawText(client.textRenderer, String.format("Best Net Damage: %.1f", bestNetDamage), x, y + 56, 0x55FFFF, false);
+            // Added 'FF' to the start of all color hexes for 100% opacity
+            drawContext.drawText(client.textRenderer, "Newgen6 DDPG - Mode 1", x, y, 0xFFFFA500, false);
+            drawContext.drawText(client.textRenderer, "Bot Status: ACTIVE", x, y + 14, 0xFF55FF55, false);
+            drawContext.drawText(client.textRenderer, "Replay Memory: " + bufferSize + " / 10000", x, y + 28, 0xFFFFFF55, false);
+            drawContext.drawText(client.textRenderer, String.format("Last Reward: %.2f", currentReward), x, y + 42, 0xFFFFFFFF, false);
+            drawContext.drawText(client.textRenderer, String.format("Best Net Damage: %.1f", bestNetDamage), x, y + 56, 0xFF55FFFF, false);
 
         } else if (hudMode == 2) {
             // --- MODE 2: Advanced Telemetry + Live Actions ---
             drawContext.fill(x - 6, y - 6, x + 225, y + 116, 0xC0000000);
 
-            drawContext.drawText(client.textRenderer, "Newgen6 DDPG - Mode 2 (Advanced)", x, y, 0x00FFFF, false);
-            drawContext.drawText(client.textRenderer, "Bot Status: ACTIVE (Continuous)", x, y + 14, 0x55FF55, false);
-            drawContext.drawText(client.textRenderer, "Replay Memory: " + bufferSize + " / 10000", x, y + 28, 0xFFFF55, false);
-            drawContext.drawText(client.textRenderer, String.format("Last Reward: %.2f", currentReward), x, y + 42, 0xFFFFFF, false);
-            drawContext.drawText(client.textRenderer, String.format("Best Net Damage: %.1f", bestNetDamage), x, y + 56, 0x55FFFF, false);
+            drawContext.drawText(client.textRenderer, "Newgen6 DDPG - Mode 2 (Advanced)", x, y, 0xFF00FFFF, false);
+            drawContext.drawText(client.textRenderer, "Bot Status: ACTIVE (Continuous)", x, y + 14, 0xFF55FF55, false);
+            drawContext.drawText(client.textRenderer, "Replay Memory: " + bufferSize + " / 10000", x, y + 28, 0xFFFFFF55, false);
+            drawContext.drawText(client.textRenderer, String.format("Last Reward: %.2f", currentReward), x, y + 42, 0xFFFFFFFF, false);
+            drawContext.drawText(client.textRenderer, String.format("Best Net Damage: %.1f", bestNetDamage), x, y + 56, 0xFF55FFFF, false);
 
-            drawContext.drawText(client.textRenderer, "Live Action Outputs:", x, y + 74, 0xFF55FF, false);
+            drawContext.drawText(client.textRenderer, "Live Action Outputs:", x, y + 74, 0xFFFF55FF, false);
             String actionString = String.format("Y:%.2f P:%.2f F:%.1f S:%.1f A:%.1f", 
                     lastAction[0], lastAction[1], lastAction[2], lastAction[3], lastAction[4]);
-            drawContext.drawText(client.textRenderer, actionString, x, y + 88, 0xFFFFFF, false);
+            drawContext.drawText(client.textRenderer, actionString, x, y + 88, 0xFFFFFFFF, false);
         }
     }
 }
