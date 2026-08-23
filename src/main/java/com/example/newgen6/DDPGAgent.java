@@ -56,15 +56,12 @@ public class DDPGAgent {
         float criticLr = 0.001f / batchSize;
 
         for (ContinuousTransition t : batch) {
-            // 1. Calculate Target Q Value: y = r + gamma * Q'(s', \mu'(s'))
             float[] nextAction = targetActor.forward(t.nextState, nextActionScratch);
             float targetQ = targetCritic.evaluate(t.nextState, nextAction);
             float y = t.reward + (t.done ? 0.0f : gamma * targetQ);
 
-            // 2. Train Critic and compute action gradients
             float[] actionGrad = critic.train(t.state, t.action, y, criticLr);
 
-            // 3. Train Actor using policy gradients
             float[] currentAction = actor.forward(t.state, actionScratch);
             actor.train(t.state, currentAction, actionGrad, actorLr);
         }
@@ -88,5 +85,10 @@ public class DDPGAgent {
 
     public int getMemorySize() {
         return memory.size();
+    }
+    
+    // ADDED: Expose noise reset
+    public void resetNoise() {
+        noise.reset();
     }
 }
