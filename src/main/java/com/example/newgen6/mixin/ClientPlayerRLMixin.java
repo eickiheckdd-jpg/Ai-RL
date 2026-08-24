@@ -16,7 +16,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
-import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 import java.util.stream.StreamSupport;
 
@@ -56,7 +55,7 @@ public abstract class ClientPlayerRLMixin {
         float reward = calculateTacticalReward(player, lockedTarget, discreteActions);
         boolean done = lockedTarget.isDead() || player.isDead();
 
-        rlMemory.add(new StepData(state, continuousActions[0], continuousActions[1], discreteActions, logProb[0], reward, value[0], done));
+        rlMemory.add(new StepData(state.clone(), continuousActions[0], continuousActions[1], discreteActions.clone(), logProb[0], reward, value[0], done));
 
         NewGen6RLMod.lastReward = reward;
         NewGen6RLMod.currentStdPitch = (float) Math.exp(NewGen6RLMod.AGENT.getLogStd()[0]);
