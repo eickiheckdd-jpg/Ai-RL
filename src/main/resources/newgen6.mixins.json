@@ -1,0 +1,14 @@
+{
+  "required": true,
+  "package": "com.example.newgen6.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "mixins": [
+    "ClientPlayerRLMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  },
+  "client": [
+    "ClientPlayerRLMixin"
+  ]
+}
