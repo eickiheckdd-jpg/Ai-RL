@@ -25,15 +25,16 @@ public class NewGen6RLMod implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        // Load model and restored STDEV state on launch
+        // Load existing model weights and STDEV state on launch
         AGENT.loadModel("ppo_model.bin");
 
-        // Safety Shutdown Hook: Auto-saves model state when Minecraft is closed
+        // Save progress on exit
         Runtime.getRuntime().addShutdownHook(new Thread(() -> {
-            System.out.println("[PPO] Auto-saving model on game exit...");
+            System.out.println("[PPO] Saving model state on game exit...");
             AGENT.saveModel("ppo_model.bin");
         }));
 
+        // Keybindings
         KeyBinding.Category cat = KeyBinding.Category.create(Identifier.of(MOD_ID, "rl"));
         toggleHudKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.hud", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_X, cat));
         toggleAiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.ai", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_C, cat));
@@ -56,13 +57,20 @@ public class NewGen6RLMod implements ClientModInitializer {
             if (!showHud || client.options.hudHidden || client.textRenderer == null) return;
 
             try {
-                // 1. Background Box (ARGB: 0x90000000 = Translucent black background)
-                context.fill(6, 6, 165, 72, 0x90000000);
-                
-                // 2. Gold Outline Border
-                context.drawBorder(6, 6, 159, 66, 0xFFFFAA00);
+                int x1 = 6, y1 = 6, x2 = 165, y2 = 72;
+                int borderColor = 0xFFFFAA00;
+                int bgColor = 0x90000000;
 
-                // 3. Status Lines with Explicit ARGB Hex Colors (0xFF forces full opacity)
+                // 1. Fill Background Box
+                context.fill(x1, y1, x2, y2, bgColor);
+                
+                // 2. Draw 1-pixel Outline Border (Top, Bottom, Left, Right)
+                context.fill(x1, y1, x2, y1 + 1, borderColor);       // Top
+                context.fill(x1, y2 - 1, x2, y2, borderColor);       // Bottom
+                context.fill(x1, y1, x1 + 1, y2, borderColor);       // Left
+                context.fill(x2 - 1, y1, x2, y2, borderColor);       // Right
+
+                // 3. Status Lines
                 context.drawText(client.textRenderer, "PPO AI TRAINER", 12, 10, 0xFFFFAA00, false);
 
                 String aiStatus = "AI: " + (aiEnabled ? "ON" : "OFF");
@@ -74,7 +82,6 @@ public class NewGen6RLMod implements ClientModInitializer {
                 context.drawText(client.textRenderer, "Epsilon: 0.20", 12, 58, 0xFFAAAAFF, false);
 
             } catch (Exception e) {
-                // Prevent HUD rendering exceptions from locking up the UI layer
                 e.printStackTrace();
             }
         });
