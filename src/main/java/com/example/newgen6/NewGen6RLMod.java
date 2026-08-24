@@ -12,22 +12,21 @@ import org.lwjgl.glfw.GLFW;
 
 public class NewGen6RLMod implements ClientModInitializer {
     public static boolean aiEnabled = false;
-    public static boolean allowMovement = false;
+    public static boolean allowMovement = true;
     public static boolean showHud = true;
-    
+
     public static float lastReward = 0.0f;
     public static float currentStdPitch = 0.0f;
     public static float currentStdYaw = 0.0f;
     public static int trainingStep = 0;
 
-    public static PPOAgent AGENT = new PPOAgent(30, 64);
+    public static PPOAgent AGENT = new PPOAgent(30);
 
     private static KeyBinding toggleHudKey;
     private static KeyBinding toggleAiKey;
 
     @Override
     public void onInitializeClient() {
-        // Register keybindings safely using standard category translation key strings
         toggleHudKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.newgen6.toggle_hud",
             InputUtil.Type.KEYSYM,
@@ -43,15 +42,10 @@ public class NewGen6RLMod implements ClientModInitializer {
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            while (toggleHudKey.wasPressed()) {
-                showHud = !showHud;
-            }
-            while (toggleAiKey.wasPressed()) {
-                aiEnabled = !aiEnabled;
-            }
+            while (toggleHudKey.wasPressed()) showHud = !showHud;
+            while (toggleAiKey.wasPressed()) aiEnabled = !aiEnabled;
         });
 
-        // Stable HUD Render Callback across modern Fabric versions
         HudRenderCallback.EVENT.register((drawContext, tickCounter) -> {
             if (!showHud) return;
             MinecraftClient client = MinecraftClient.getInstance();
