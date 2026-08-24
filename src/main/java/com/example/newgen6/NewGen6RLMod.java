@@ -13,20 +13,17 @@ import org.lwjgl.glfw.GLFW;
 import java.nio.file.Path;
 
 public class NewGen6RLMod implements ClientModInitializer {
-    public static final PPOAgent AGENT = new PPOAgent(14, 256); 
+    // Upgraded to 21 State Dimensions for tactical combat inputs
+    public static final PPOAgent AGENT = new PPOAgent(21, 256); 
     public static boolean aiEnabled = false;
     private static KeyBinding toggleAiKey;
     private static Path brainPath;
 
     @Override
     public void onInitializeClient() {
-        // Find the config directory to save the brain to
         brainPath = FabricLoader.getInstance().getConfigDir().resolve("newgen6_brain.bin");
-        
-        // Load existing brain if available
         AGENT.loadBrain(brainPath);
 
-        // Register the KeyBinding to 'C'
         toggleAiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.newgen6.toggle", 
             InputUtil.Type.KEYSYM, 
@@ -34,12 +31,10 @@ public class NewGen6RLMod implements ClientModInitializer {
             "category.newgen6.title"
         ));
 
-        // Listen for key presses to toggle the AI state
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (toggleAiKey.wasPressed()) {
                 aiEnabled = !aiEnabled;
                 
-                // Save brain whenever toggled off so progress is safe
                 if (!aiEnabled) {
                     AGENT.saveBrain(brainPath);
                 }
@@ -50,7 +45,5 @@ public class NewGen6RLMod implements ClientModInitializer {
                 }
             }
         });
-        
-        System.out.println("NewGen6 Hybrid PPO Agent Loaded.");
     }
 }
