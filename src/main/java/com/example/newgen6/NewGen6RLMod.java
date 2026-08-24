@@ -17,22 +17,30 @@ public class NewGen6RLMod implements ClientModInitializer {
     public static boolean aiEnabled = false; 
     public static boolean showHud = true;
     public static float lastReward = 0.0f;
-    public static int trainingStep = 0;
 
-    // 30 Inputs, 8 Continuous Actions, 2048 Batch Size
     public static final PPOAgent AGENT = new PPOAgent(30, 8, 2048);
     private static KeyBinding toggleHudKey;
     private static KeyBinding toggleAiKey;
+    private static KeyBinding saveModelKey;
 
     @Override
     public void onInitializeClient() {
+        AGENT.loadModel("ppo_model.bin");
+
         KeyBinding.Category cat = KeyBinding.Category.create(Identifier.of(MOD_ID, "rl"));
         toggleHudKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.hud", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_X, cat));
         toggleAiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.ai", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_C, cat));
+        saveModelKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.save", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_V, cat));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (toggleHudKey.wasPressed()) showHud = !showHud;
             while (toggleAiKey.wasPressed()) aiEnabled = !aiEnabled;
+            while (saveModelKey.wasPressed()) {
+                AGENT.saveModel("ppo_model.bin");
+                if (client.player != null) {
+                    client.player.sendMessage(Text.literal("§a[PPO] Saved to ppo_model.bin!"), false);
+                }
+            }
         });
 
         HudRenderCallback.EVENT.register((drawContext, tick) -> {
