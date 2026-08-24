@@ -2,8 +2,14 @@ package com.example.newgen6;
 
 import com.example.newgen6.rl.PPOAgent;
 import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
+import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.util.InputUtil;
+import net.minecraft.util.Identifier;
+import org.lwjgl.glfw.GLFW;
 
 public class NewGen6RLMod implements ClientModInitializer {
     public static final String MOD_ID = "newgen6";
@@ -19,8 +25,32 @@ public class NewGen6RLMod implements ClientModInitializer {
 
     public static PPOAgent AGENT = new PPOAgent(30);
 
+    private static KeyBinding toggleHudKey;
+    private static KeyBinding toggleAiKey;
+
     @Override
     public void onInitializeClient() {
+        KeyBinding.Category customCategory = KeyBinding.Category.create(Identifier.of(MOD_ID, "rl"));
+
+        toggleHudKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+            "key.newgen6.toggle_hud",
+            InputUtil.Type.KEYSYM,
+            GLFW.GLFW_KEY_X,
+            customCategory
+        ));
+
+        toggleAiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+            "key.newgen6.toggle_ai",
+            InputUtil.Type.KEYSYM,
+            GLFW.GLFW_KEY_C,
+            customCategory
+        ));
+
+        ClientTickEvents.END_CLIENT_TICK.register(client -> {
+            while (toggleHudKey.wasPressed()) showHud = !showHud;
+            while (toggleAiKey.wasPressed()) aiEnabled = !aiEnabled;
+        });
+
         HudRenderCallback.EVENT.register((drawContext, tickCounter) -> {
             if (!showHud) return;
             MinecraftClient client = MinecraftClient.getInstance();
