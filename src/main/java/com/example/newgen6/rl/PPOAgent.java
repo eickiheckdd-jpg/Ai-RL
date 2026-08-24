@@ -11,9 +11,14 @@ public class PPOAgent {
     private final float[][] stateMemory;
     private final float[][] actionMemory;
     private final float[] rewardMemory;
+    private final float[] logProbMemory;
+    private final boolean[] doneMemory;
     private int memoryIndex = 0;
 
     private final AtomicBoolean isTraining = new AtomicBoolean(false);
+    private static final float GAMMA = 0.99f;
+    private static final float EPSILON = 0.2f; // PPO Clip threshold
+    private static final float STDEV = 0.2f;    // Action distribution variance
 
     public PPOAgent(int stateDim, int actionDim, int batchSize) {
         this.stateDim = stateDim;
@@ -26,21 +31,36 @@ public class PPOAgent {
         this.stateMemory = new float[batchSize][stateDim];
         this.actionMemory = new float[batchSize][actionDim];
         this.rewardMemory = new float[batchSize];
+        this.logProbMemory = new float[batchSize];
+        this.doneMemory = new boolean[batchSize];
     }
 
     public void selectAction(float[] state, float[] outActions) {
-        // Fixed: Mouse controls do NOT stop when training starts
         actor.forward(state, outActions);
         for (int i = 0; i < actionDim; i++) {
-            outActions[i] += (float) (Math.random() - 0.5) * 0.35f;
+            outActions[i] += (float) (Math.random() - 0.5) * (STDEV * 2.0f);
         }
     }
 
+    private float computeLogProb(float[] mean, float[] action) {
+        float logProb = 0.0f;
+        for (int i = 0; i < actionDim; i++) {
+            float diff = action[i] - mean[i];
+            logProb += -0.5f * ((diff * diff) / (STDEV * STDEV) + (float) Math.log(2 * Math.PI * STDEV * STDEV));
+        }
+        return logProb;
+    }
+
     public void storeMemoryAndTrain(float[] state, float[] actions, float reward, boolean done) {
-        // Deep copy state and action values into separate slots to prevent array reference mutations
         System.arraycopy(state, 0, stateMemory[memoryIndex], 0, stateDim);
         System.arraycopy(actions, 0, actionMemory[memoryIndex], 0, actionDim);
         rewardMemory[memoryIndex] = reward;
+        doneMemory[memoryIndex] = done;
+
+        float[] mean = new float[actionDim];
+        actor.forward(state, mean);
+        logProbMemory[memoryIndex] = computeLogProb(mean, actions);
+
         memoryIndex++;
 
         if (memoryIndex >= batchSize || done) {
@@ -60,33 +80,55 @@ public class PPOAgent {
     }
 
     private void computePPOUpdate(int samples) {
-        float lr = 0.001f;
-        float[] actorOut = new float[actionDim];
-        float[] criticOut = new float[1];
+        float lrActor = 0.0003f;
+        float lrCritic = 0.001f;
+        int epochs = 4;
 
-        for (int k = 0; k < samples; k++) {
-            float[] state = stateMemory[k];
-            float[] action = actionMemory[k];
-            float reward = rewardMemory[k];
+        float[] returns = new float[samples];
+        float[] advantages = new float[samples];
+        float[] criticVal = new float[1];
 
-            float[] actorH2 = actor.forward(state, actorOut);
-            float[] criticH2 = critic.forward(state, criticOut);
+        // 1. Compute Discounted Future Returns & Advantage Estimation (TD)
+        float runningReturn = 0.0f;
+        for (int t = samples - 1; t >= 0; t--) {
+            if (doneMemory[t]) runningReturn = 0.0f;
+            runningReturn = rewardMemory[t] + (GAMMA * runningReturn);
+            returns[t] = runningReturn;
 
-            // TD Advantage Signal
-            float advantage = reward - criticOut[0];
+            critic.forward(stateMemory[t], criticVal);
+            advantages[t] = returns[t] - criticVal[0];
+        }
 
-            // Update Critic Output Layer
-            critic.weights3[0][0] += lr * advantage;
-            for (int i = 0; i < criticH2.length; i++) {
-                critic.weights3[i][0] += lr * advantage * criticH2[i];
-            }
+        // 2. PPO Multi-Epoch Optimization
+        for (int e = 0; e < epochs; e++) {
+            for (int k = 0; k < samples; k++) {
+                float[] state = stateMemory[k];
+                float[] action = actionMemory[k];
+                float oldLogProb = logProbMemory[k];
+                float advantage = advantages[k];
 
-            // Update Actor Output Layer
-            for (int j = 0; j < actionDim; j++) {
-                float error = (action[j] - actorOut[j]) * advantage;
-                for (int i = 0; i < actorH2.length; i++) {
-                    actor.weights3[i][j] += lr * error * actorH2[i];
+                // Actor Optimization with PPO Clipping
+                float[] currentMean = new float[actionDim];
+                float[][] actorActivations = actor.forwardDetailed(state, currentMean);
+                float newLogProb = computeLogProb(currentMean, action);
+
+                float ratio = (float) Math.exp(newLogProb - oldLogProb);
+                float surr1 = ratio * advantage;
+                float surr2 = Math.max(Math.min(ratio, 1.0f + EPSILON), 1.0f - EPSILON) * advantage;
+                
+                // Policy Loss Gradient Direction
+                float policyGrad = Math.min(surr1, surr2);
+                float[] actorGradients = new float[actionDim];
+                for (int i = 0; i < actionDim; i++) {
+                    float diff = action[i] - currentMean[i];
+                    actorGradients[i] = (diff / (STDEV * STDEV)) * policyGrad;
                 }
+                actor.trainBackward(actorActivations, actorGradients, lrActor);
+
+                // Critic Optimization (MSE Loss Value Function)
+                float[][] criticActivations = critic.forwardDetailed(state, criticVal);
+                float criticError = returns[k] - criticVal[0];
+                critic.trainBackward(criticActivations, new float[]{criticError}, lrCritic);
             }
         }
     }
