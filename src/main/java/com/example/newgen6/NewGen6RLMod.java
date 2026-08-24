@@ -43,19 +43,14 @@ public class NewGen6RLMod implements ClientModInitializer {
             }
         });
 
-        // Fabric HUD Registration for 1.21.11
         HudElementRegistry.addLast(Identifier.of(MOD_ID, "hud"), (context, tickCounter) -> {
             MinecraftClient client = MinecraftClient.getInstance();
             if (!showHud || client.options.hudHidden || client.textRenderer == null) return;
 
-            // 1. Render Background Box
+            // 1. Draw Translucent Background Box
             context.fill(6, 6, 155, 48, 0x90000000);
 
-            // 2. Translate Matrix Pose forward to guarantee text draws on TOP of the background layer
-            context.getMatrices().push();
-            context.getMatrices().translate(0, 0, 100);
-
-            // 3. Draw Text Elements
+            // 2. Draw Text Layers directly on top using the 1.21+ DrawContext signature
             context.drawText(client.textRenderer, Text.literal("PPO AI TRAINER"), 10, 10, 0xFFAA00, true);
             
             Text aiStatusText = Text.literal("AI: " + (aiEnabled ? "ON" : "OFF"));
@@ -64,9 +59,6 @@ public class NewGen6RLMod implements ClientModInitializer {
 
             Text rewardText = Text.literal(String.format("Reward: %.2f", lastReward));
             context.drawText(client.textRenderer, rewardText, 10, 34, 0xFFFF55, true);
-
-            // 4. Pop Matrix Pose back to default
-            context.getMatrices().pop();
         });
     }
 }
