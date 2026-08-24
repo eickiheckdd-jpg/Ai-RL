@@ -29,7 +29,7 @@ public class PPOAgent {
     }
 
     public void selectAction(float[] state, float[] outActions) {
-        if (isTraining.get()) return;
+        // Fixed: Mouse controls do NOT stop when training starts
         actor.forward(state, outActions);
         for (int i = 0; i < actionDim; i++) {
             outActions[i] += (float) (Math.random() - 0.5) * 0.2f;
@@ -37,30 +37,58 @@ public class PPOAgent {
     }
 
     public void storeMemoryAndTrain(float[] state, float[] actions, float reward, boolean done) {
-        if (isTraining.get()) return;
-
+        // Deep copy state and action values into separate slots to prevent array reference mutations
         System.arraycopy(state, 0, stateMemory[memoryIndex], 0, stateDim);
         System.arraycopy(actions, 0, actionMemory[memoryIndex], 0, actionDim);
         rewardMemory[memoryIndex] = reward;
         memoryIndex++;
 
         if (memoryIndex >= batchSize || done) {
-            isTraining.set(true);
-            int samples = memoryIndex;
-            memoryIndex = 0;
+            if (isTraining.compareAndSet(false, true)) {
+                int samples = memoryIndex;
+                memoryIndex = 0;
 
-            CompletableFuture.runAsync(() -> {
-                try {
-                    computePPOUpdate(samples);
-                } finally {
-                    isTraining.set(false);
-                }
-            });
+                CompletableFuture.runAsync(() -> {
+                    try {
+                        computePPOUpdate(samples);
+                    } finally {
+                        isTraining.set(false);
+                    }
+                });
+            }
         }
     }
 
     private void computePPOUpdate(int samples) {
-        // Gradient update calculation logic goes here
+        float lr = 0.001f;
+        float[] actorOut = new float[actionDim];
+        float[] criticOut = new float[1];
+
+        for (int k = 0; k < samples; k++) {
+            float[] state = stateMemory[k];
+            float[] action = actionMemory[k];
+            float reward = rewardMemory[k];
+
+            float[] actorH2 = actor.forward(state, actorOut);
+            float[] criticH2 = critic.forward(state, criticOut);
+
+            // TD Advantage Signal
+            float advantage = reward - criticOut[0];
+
+            // Update Critic Output Layer
+            critic.weights3[0][0] += lr * advantage;
+            for (int i = 0; i < criticH2.length; i++) {
+                critic.weights3[i][0] += lr * advantage * criticH2[i];
+            }
+
+            // Update Actor Output Layer
+            for (int j = 0; j < actionDim; j++) {
+                float error = (action[j] - actorOut[j]) * advantage;
+                for (int i = 0; i < actorH2.length; i++) {
+                    actor.weights3[i][j] += lr * error * actorH2[i];
+                }
+            }
+        }
     }
 
     public void saveModel(String path) {
