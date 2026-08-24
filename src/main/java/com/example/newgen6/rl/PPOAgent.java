@@ -4,7 +4,9 @@ import java.io.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.atomic.AtomicBoolean;
 
-public class PPOAgent {
+public class PPOAgent implements Serializable {
+    private static final long serialVersionUID = 1L;
+
     public MLP actor, critic;
     private final int batchSize, stateDim, actionDim;
 
@@ -17,8 +19,14 @@ public class PPOAgent {
 
     private final AtomicBoolean isTraining = new AtomicBoolean(false);
     private static final float GAMMA = 0.99f;
-    private static final float EPSILON = 0.2f;  // PPO Clip threshold
-    private static final float STDEV = 0.35f;   // Updated variance for broader exploration
+    
+    // Made public so HUD rendering can access EPSILON directly
+    public static final float EPSILON = 0.2f;    // PPO Clip threshold
+    
+    // Dynamic noise settings (Saved to model state and made public for HUD)
+    public float stdev = 0.35f;                    
+    private static final float MIN_STDEV = 0.05f;  
+    private static final float DECAY_RATE = 0.995f; 
 
     public PPOAgent(int stateDim, int actionDim, int batchSize) {
         this.stateDim = stateDim;
@@ -38,7 +46,7 @@ public class PPOAgent {
     public void selectAction(float[] state, float[] outActions) {
         actor.forward(state, outActions);
         for (int i = 0; i < actionDim; i++) {
-            outActions[i] += (float) (Math.random() - 0.5) * (STDEV * 2.0f);
+            outActions[i] += (float) (Math.random() - 0.5) * (stdev * 2.0f);
         }
     }
 
@@ -46,7 +54,7 @@ public class PPOAgent {
         float logProb = 0.0f;
         for (int i = 0; i < actionDim; i++) {
             float diff = action[i] - mean[i];
-            logProb += -0.5f * ((diff * diff) / (STDEV * STDEV) + (float) Math.log(2 * Math.PI * STDEV * STDEV));
+            logProb += -0.5f * ((diff * diff) / (stdev * stdev) + (float) Math.log(2 * Math.PI * stdev * stdev));
         }
         return logProb;
     }
@@ -67,6 +75,11 @@ public class PPOAgent {
             if (isTraining.compareAndSet(false, true)) {
                 int samples = memoryIndex;
                 memoryIndex = 0;
+
+                // Decay noise safely over time
+                if (stdev > MIN_STDEV) {
+                    stdev = Math.max(MIN_STDEV, stdev * DECAY_RATE);
+                }
 
                 CompletableFuture.runAsync(() -> {
                     try {
@@ -90,6 +103,7 @@ public class PPOAgent {
 
         // 1. Compute Discounted Future Returns & Advantage Estimation (TD)
         float runningReturn = 0.0f;
+        float advMean = 0.0f;
         for (int t = samples - 1; t >= 0; t--) {
             if (doneMemory[t]) runningReturn = 0.0f;
             runningReturn = rewardMemory[t] + (GAMMA * runningReturn);
@@ -97,9 +111,23 @@ public class PPOAgent {
 
             critic.forward(stateMemory[t], criticVal);
             advantages[t] = returns[t] - criticVal[0];
+            advMean += advantages[t];
         }
 
-        // 2. PPO Multi-Epoch Optimization
+        // 2. Normalize Advantages (Prevents Explosive Gradients)
+        advMean /= samples;
+        float advStd = 0.0f;
+        for (int t = 0; t < samples; t++) {
+            float diff = advantages[t] - advMean;
+            advStd += diff * diff;
+        }
+        advStd = (float) Math.sqrt(advStd / samples) + 1e-8f;
+
+        for (int t = 0; t < samples; t++) {
+            advantages[t] = (advantages[t] - advMean) / advStd;
+        }
+
+        // 3. PPO Multi-Epoch Optimization
         for (int e = 0; e < epochs; e++) {
             for (int k = 0; k < samples; k++) {
                 float[] state = stateMemory[k];
@@ -112,16 +140,18 @@ public class PPOAgent {
                 float[][] actorActivations = actor.forwardDetailed(state, currentMean);
                 float newLogProb = computeLogProb(currentMean, action);
 
-                float ratio = (float) Math.exp(newLogProb - oldLogProb);
+                // Safety Clamp on Exponent to prevent NaN/Infinity
+                float logRatio = Math.max(-20.0f, Math.min(20.0f, newLogProb - oldLogProb));
+                float ratio = (float) Math.exp(logRatio);
+                
                 float surr1 = ratio * advantage;
                 float surr2 = Math.max(Math.min(ratio, 1.0f + EPSILON), 1.0f - EPSILON) * advantage;
                 
-                // Policy Loss Gradient Direction
                 float policyGrad = Math.min(surr1, surr2);
                 float[] actorGradients = new float[actionDim];
                 for (int i = 0; i < actionDim; i++) {
                     float diff = action[i] - currentMean[i];
-                    actorGradients[i] = (diff / (STDEV * STDEV)) * policyGrad;
+                    actorGradients[i] = (diff / (stdev * stdev)) * policyGrad;
                 }
                 actor.trainBackward(actorActivations, actorGradients, lrActor);
 
@@ -137,7 +167,8 @@ public class PPOAgent {
         try (ObjectOutputStream out = new ObjectOutputStream(new FileOutputStream(path))) {
             out.writeObject(actor);
             out.writeObject(critic);
-            System.out.println("[PPO] Saved model to " + path);
+            out.writeFloat(stdev); // Persist exploration decay state
+            System.out.println("[PPO] Saved model to " + path + " | STDEV: " + stdev);
         } catch (Exception e) {
             e.printStackTrace();
         }
@@ -153,9 +184,10 @@ public class PPOAgent {
         try (ObjectInputStream in = new ObjectInputStream(new FileInputStream(path))) {
             actor = (MLP) in.readObject();
             critic = (MLP) in.readObject();
+            stdev = in.readFloat(); // Restore persisted exploration noise level
             actor.initTransient();
             critic.initTransient();
-            System.out.println("[PPO] Loaded model from " + path);
+            System.out.println("[PPO] Loaded model from " + path + " | Restored STDEV: " + stdev);
         } catch (Exception e) {
             e.printStackTrace();
         }
