@@ -5,9 +5,16 @@ import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 
 public class PPOEngine {
-    private final int stateDim = 13, actionDim = 5; // Upgraded to 13 states
-    private final float[] weightsActor = new float[stateDim * actionDim];
-    private final float[] weightsCritic = new float[stateDim];
+    private final int stateDim = 13, hiddenDim = 24, actionDim = 7;
+    
+    // Deep Actor Weights (Input -> Hidden -> Output)
+    private final float[] wActor1 = new float[stateDim * hiddenDim];
+    private final float[] wActor2 = new float[hiddenDim * actionDim];
+    
+    // Deep Critic Weights
+    private final float[] wCritic1 = new float[stateDim * hiddenDim];
+    private final float[] wCritic2 = new float[hiddenDim];
+
     private final Random rand = new Random();
     public float stdev = 0.25f;
 
@@ -15,57 +22,85 @@ public class PPOEngine {
     private final File backupSave = new File("pvp_brain_backup.bin");
 
     public PPOEngine() {
-        for (int i = 0; i < weightsActor.length; i++) weightsActor[i] = (rand.nextFloat() - 0.5f) * 0.1f;
-        for (int i = 0; i < weightsCritic.length; i++) weightsCritic[i] = (rand.nextFloat() - 0.5f) * 0.1f;
+        initWeights(wActor1); initWeights(wActor2);
+        initWeights(wCritic1); initWeights(wCritic2);
         loadBrain();
         Runtime.getRuntime().addShutdownHook(new Thread(this::saveBrain));
     }
 
+    private void initWeights(float[] arr) {
+        for (int i = 0; i < arr.length; i++) arr[i] = (rand.nextFloat() - 0.5f) * 0.1f;
+    }
+
+    // Forward Pass with ReLU Hidden Layer
     public void selectAction(float[] state, float[] outActions) {
+        float[] hidden = new float[hiddenDim];
+        for (int i = 0; i < hiddenDim; i++) {
+            float sum = 0.0f;
+            for (int j = 0; j < stateDim; j++) sum += state[j] * wActor1[i * stateDim + j];
+            hidden[i] = Math.max(0.0f, sum); // ReLU Activation
+        }
+
         for (int i = 0; i < actionDim; i++) {
             float sum = 0.0f;
-            for (int j = 0; j < stateDim; j++) sum += state[j] * weightsActor[i * stateDim + j];
-            float mean = (float) Math.tanh(sum); 
-            
-            // Dynamic exploration noise scales down when crosshair is locked
-            float adaptiveNoise = stdev * (1.1f - Math.abs(state[3])); 
-            outActions[i] = Math.max(-1.0f, Math.min(1.0f, mean + (float) (rand.nextGaussian() * adaptiveNoise)));
+            for (int j = 0; j < hiddenDim; j++) sum += hidden[j] * wActor2[i * hiddenDim + j];
+            float mean = (float) Math.tanh(sum);
+            float noise = (float) (rand.nextGaussian() * (stdev * (1.1f - Math.abs(state[3]))));
+            outActions[i] = Math.max(-1.0f, Math.min(1.0f, mean + noise));
         }
     }
 
-    // Thread-safe Async PPO Update Loop
     public void trainAsync(float[] stateIn, float[] actionsIn, float reward, float[] nextStateIn) {
-        // Safe cloning prevents main-thread mutation during async computation
         final float[] state = stateIn.clone();
         final float[] actions = actionsIn.clone();
         final float[] nextState = nextStateIn.clone();
 
         CompletableFuture.runAsync(() -> {
+            float[] hCurr = forwardHidden(state, wCritic1);
+            float[] hNext = forwardHidden(nextState, wCritic1);
+
             float vCurrent = 0.0f, vNext = 0.0f;
-            for (int i = 0; i < stateDim; i++) {
-                vCurrent += state[i] * weightsCritic[i];
-                vNext += nextState[i] * weightsCritic[i];
+            for (int i = 0; i < hiddenDim; i++) {
+                vCurrent += hCurr[i] * wCritic2[i];
+                vNext += hNext[i] * wCritic2[i];
             }
 
             float advantage = reward + (0.98f * vNext) - vCurrent;
 
-            // Critic Update
-            for (int i = 0; i < stateDim; i++) {
-                float gradC = Math.max(-1.0f, Math.min(1.0f, advantage * state[i]));
-                weightsCritic[i] += 0.005f * gradC;
-            }
-
-            // Actor Update with Clipped Gradients
-            for (int i = 0; i < actionDim; i++) {
+            // Critic Backprop
+            for (int i = 0; i < hiddenDim; i++) {
+                wCritic2[i] += 0.005f * Math.max(-1.0f, Math.min(1.0f, advantage * hCurr[i]));
                 for (int j = 0; j < stateDim; j++) {
-                    float policyGrad = advantage * actions[i] * state[j];
-                    float clippedGrad = Math.max(-0.2f, Math.min(0.2f, policyGrad));
-                    weightsActor[i * stateDim + j] += 0.002f * clippedGrad;
+                    if (hCurr[i] > 0) wCritic1[i * stateDim + j] += 0.002f * advantage * state[j];
                 }
             }
 
-            if (stdev > 0.02f) stdev *= 0.99995f;
+            // Actor Backprop
+            float[] hActor = forwardHidden(state, wActor1);
+            for (int i = 0; i < actionDim; i++) {
+                float grad = Math.max(-0.2f, Math.min(0.2f, advantage * actions[i]));
+                for (int j = 0; j < hiddenDim; j++) {
+                    wActor2[i * hiddenDim + j] += 0.002f * grad * hActor[j];
+                    if (hActor[j] > 0) {
+                        for (int k = 0; k < stateDim; k++) {
+                            wActor1[j * stateDim + k] += 0.0005f * grad * state[k];
+                        }
+                    }
+                }
+            }
+
+            if (stdev > 0.01f) stdev *= 0.99995f;
         });
+    }
+
+    private float[] forwardHidden(float[] in, float[] weights) {
+        float[] h = new float[hiddenDim];
+        for (int i = 0; i < hiddenDim; i++) {
+            float sum = 0.0f;
+            for (int j = 0; j < in.length; j++) sum += in[j] * weights[i * in.length + j];
+            h[i] = Math.max(0.0f, sum);
+        }
+        return h;
     }
 
     public void saveBrainAsync() { CompletableFuture.runAsync(this::saveBrain); }
@@ -77,8 +112,10 @@ public class PPOEngine {
                 primarySave.renameTo(backupSave);
             }
             try (DataOutputStream dos = new DataOutputStream(new FileOutputStream(primarySave))) {
-                for (float w : weightsActor) dos.writeFloat(w);
-                for (float w : weightsCritic) dos.writeFloat(w);
+                for (float w : wActor1) dos.writeFloat(w);
+                for (float w : wActor2) dos.writeFloat(w);
+                for (float w : wCritic1) dos.writeFloat(w);
+                for (float w : wCritic2) dos.writeFloat(w);
                 dos.writeFloat(stdev);
             }
         } catch (IOException ignored) {}
@@ -88,8 +125,10 @@ public class PPOEngine {
         File target = primarySave.exists() ? primarySave : (backupSave.exists() ? backupSave : null);
         if (target == null) return;
         try (DataInputStream dis = new DataInputStream(new FileInputStream(target))) {
-            for (int i = 0; i < weightsActor.length; i++) weightsActor[i] = dis.readFloat();
-            for (int i = 0; i < weightsCritic.length; i++) weightsCritic[i] = dis.readFloat();
+            for (int i = 0; i < wActor1.length; i++) wActor1[i] = dis.readFloat();
+            for (int i = 0; i < wActor2.length; i++) wActor2[i] = dis.readFloat();
+            for (int i = 0; i < wCritic1.length; i++) wCritic1[i] = dis.readFloat();
+            for (int i = 0; i < wCritic2.length; i++) wCritic2[i] = dis.readFloat();
             stdev = dis.readFloat();
         } catch (IOException e) {
             if (target.equals(primarySave) && backupSave.exists()) loadBrain();
