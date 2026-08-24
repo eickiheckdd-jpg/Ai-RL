@@ -17,8 +17,8 @@ public class PPOAgent {
 
     private final AtomicBoolean isTraining = new AtomicBoolean(false);
     private static final float GAMMA = 0.99f;
-    private static final float EPSILON = 0.2f; // PPO Clip threshold
-    private static final float STDEV = 0.2f;    // Action distribution variance
+    private static final float EPSILON = 0.2f;  // PPO Clip threshold
+    private static final float STDEV = 0.35f;   // Updated variance for broader exploration
 
     public PPOAgent(int stateDim, int actionDim, int batchSize) {
         this.stateDim = stateDim;
