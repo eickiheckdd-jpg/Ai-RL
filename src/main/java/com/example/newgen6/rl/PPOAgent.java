@@ -9,26 +9,47 @@ import java.util.Random;
 public class PPOAgent {
     // 16 Actor Outputs: 2 continuous (Pitch/Yaw) + 7 binary discrete heads (14 logits)
     private final int stateDim, hiddenDim, actionDim = 16;
-    private final float lr = 0.00025f, gamma = 0.99f, gaeLambda = 0.95f, clipEps = 0.2f;
+    private final float lr = 0.0003f, gamma = 0.99f, gaeLambda = 0.95f, clipEps = 0.2f;
     private final float entropyCoeff = 0.01f; 
 
-    private float actionStd = 0.6f; 
-    private final float minActionStd = 0.05f;
-    private final float decayRate = 0.999f;
+    // Adam Optimizer Hyperparameters
+    private final float beta1 = 0.9f, beta2 = 0.999f, eps = 1e-8f;
+    private int timeStep = 0;
 
+    // Weight Matrices & Biases
     public Matrix w1, b1, wActor, bActor, wCritic, bCritic;
+    
+    // Adam First (m) and Second (v) Moment Accumulators
+    private Matrix m_w1, v_w1, m_b1, v_b1;
+    private Matrix m_wA, v_wA, m_bA, v_bA;
+    private Matrix m_wC, v_wC, m_bC, v_bC;
+
+    // Dynamic Log Standard Deviations for Pitch (0) and Yaw (1)
+    private final float[] logStd = new float[] { -0.5f, -0.5f }; // Default std ≈ 0.6
+    private final float[] m_logStd = new float[2];
+    private final float[] v_logStd = new float[2];
+
     private final Random rng = new Random();
 
     public PPOAgent(int stateDim, int hiddenDim) {
         this.stateDim = stateDim;
         this.hiddenDim = hiddenDim;
 
+        // Weights Initialization
         this.w1 = Matrix.randomXavier(hiddenDim, stateDim, rng);
         this.b1 = new Matrix(hiddenDim, 1);
         this.wActor = Matrix.randomXavier(actionDim, hiddenDim, rng);
         this.bActor = new Matrix(actionDim, 1);
         this.wCritic = Matrix.randomXavier(1, hiddenDim, rng);
         this.bCritic = new Matrix(1, 1);
+
+        // Adam State Buffers
+        this.m_w1 = new Matrix(hiddenDim, stateDim); this.v_w1 = new Matrix(hiddenDim, stateDim);
+        this.m_b1 = new Matrix(hiddenDim, 1);        this.v_b1 = new Matrix(hiddenDim, 1);
+        this.m_wA = new Matrix(actionDim, hiddenDim); this.v_wA = new Matrix(actionDim, hiddenDim);
+        this.m_bA = new Matrix(actionDim, 1);        this.v_bA = new Matrix(actionDim, 1);
+        this.m_wC = new Matrix(1, hiddenDim);        this.v_wC = new Matrix(1, hiddenDim);
+        this.m_bC = new Matrix(1, 1);                this.v_bC = new Matrix(1, 1);
     }
 
     public static class StepData {
@@ -49,12 +70,16 @@ public class PPOAgent {
         float[] logits = matmulAdd(wActor, hidden, bActor);
         valueOut[0] = matmulAdd(wCritic, hidden, bCritic)[0];
 
-        // Tanh bounded continuous outputs normalized in range [-1.0, 1.0]
+        // Continuous means bounded inside [-1.0, 1.0]
         float muPitch = (float) Math.tanh(logits[0]);
         float muYaw = (float) Math.tanh(logits[1]);
 
-        continuousOut[0] = (float) (muPitch + rng.nextGaussian() * actionStd);
-        continuousOut[1] = (float) (muYaw + rng.nextGaussian() * actionStd);
+        float stdPitch = (float) Math.exp(logStd[0]);
+        float stdYaw = (float) Math.exp(logStd[1]);
+
+        // Sample continuous actions using learned std
+        continuousOut[0] = (float) (muPitch + rng.nextGaussian() * stdPitch);
+        continuousOut[1] = (float) (muYaw + rng.nextGaussian() * stdYaw);
 
         float logProbDiscreteAcc = 0.0f;
 
@@ -65,23 +90,22 @@ public class PPOAgent {
             logProbDiscreteAcc += (float) Math.log(probs[discreteOut[k]] + 1e-8f);
         }
 
-        float logProbContinuous = -0.5f * (float) (
-            Math.pow((continuousOut[0] - muPitch) / actionStd, 2) + 
-            Math.pow((continuousOut[1] - muYaw) / actionStd, 2)
-        ) - (float) Math.log(actionStd * Math.sqrt(2 * Math.PI));
+        float logProbPitch = -0.5f * (float) Math.pow((continuousOut[0] - muPitch) / stdPitch, 2) - logStd[0] - 0.5f * (float) Math.log(2 * Math.PI);
+        float logProbYaw   = -0.5f * (float) Math.pow((continuousOut[1] - muYaw) / stdYaw, 2) - logStd[1] - 0.5f * (float) Math.log(2 * Math.PI);
 
-        logProbOut[0] = logProbContinuous + logProbDiscreteAcc;
+        logProbOut[0] = logProbPitch + logProbYaw + logProbDiscreteAcc;
     }
 
     public void train(List<StepData> memory) {
         int N = memory.size();
         if (N == 0) return;
 
+        timeStep++;
         float[] advantages = new float[N];
         float[] returns = new float[N];
         float gae = 0.0f;
 
-        // Generalized Advantage Estimation (GAE)
+        // 1. Generalized Advantage Estimation (GAE)
         for (int i = N - 1; i >= 0; i--) {
             StepData cur = memory.get(i);
             float nextVal = (i == N - 1 || cur.done) ? 0.0f : memory.get(i + 1).value;
@@ -91,8 +115,30 @@ public class PPOAgent {
             returns[i] = gae + cur.value;
         }
 
-        // PPO Optimization Epochs
+        // 2. Batch Advantage Normalization
+        float advMean = 0.0f, advStd = 0.0f;
+        for (float a : advantages) advMean += a;
+        advMean /= N;
+        for (float a : advantages) advStd += (a - advMean) * (a - advMean);
+        advStd = (float) Math.sqrt(advStd / N) + 1e-8f;
+
+        for (int i = 0; i < N; i++) {
+            advantages[i] = (advantages[i] - advMean) / advStd;
+        }
+
+        // 3. PPO Optimization Epochs
         for (int epoch = 0; epoch < 4; epoch++) {
+            Matrix g_w1 = new Matrix(hiddenDim, stateDim);
+            Matrix g_b1 = new Matrix(hiddenDim, 1);
+            Matrix g_wA = new Matrix(actionDim, hiddenDim);
+            Matrix g_bA = new Matrix(actionDim, 1);
+            Matrix g_wC = new Matrix(1, hiddenDim);
+            Matrix g_bC = new Matrix(1, 1);
+            float[] g_logStd = new float[2];
+
+            float stdPitch = (float) Math.exp(logStd[0]);
+            float stdYaw = (float) Math.exp(logStd[1]);
+
             for (int i = 0; i < N; i++) {
                 StepData data = memory.get(i);
 
@@ -104,10 +150,8 @@ public class PPOAgent {
                 float muPitch = (float) Math.tanh(logits[0]);
                 float muYaw = (float) Math.tanh(logits[1]);
 
-                float curLogProbCont = -0.5f * (float) (
-                    Math.pow((data.pitchDelta - muPitch) / actionStd, 2) + 
-                    Math.pow((data.yawDelta - muYaw) / actionStd, 2)
-                ) - (float) Math.log(actionStd * Math.sqrt(2 * Math.PI));
+                float curLogProbPitch = -0.5f * (float) Math.pow((data.pitchDelta - muPitch) / stdPitch, 2) - logStd[0] - 0.5f * (float) Math.log(2 * Math.PI);
+                float curLogProbYaw   = -0.5f * (float) Math.pow((data.yawDelta - muYaw) / stdYaw, 2) - logStd[1] - 0.5f * (float) Math.log(2 * Math.PI);
 
                 float curLogProbDisc = 0.0f;
                 float[][] probsDisc = new float[7][2];
@@ -116,29 +160,28 @@ public class PPOAgent {
                     curLogProbDisc += (float) Math.log(probsDisc[k][data.discreteActions[k]] + 1e-8f);
                 }
 
-                float curLogProb = curLogProbCont + curLogProbDisc;
+                float curLogProb = curLogProbPitch + curLogProbYaw + curLogProbDisc;
                 float ratio = (float) Math.exp(curLogProb - data.logProb);
                 float adv = advantages[i];
 
                 // PPO Clipped Objective Gradient
-                float dL_dLogProb;
-                if ((ratio > 1f + clipEps && adv > 0) || (ratio < 1f - clipEps && adv < 0)) {
-                    dL_dLogProb = 0.0f;
-                } else {
-                    dL_dLogProb = -adv * ratio;
-                }
+                float dL_dLogProb = ((ratio > 1f + clipEps && adv > 0) || (ratio < 1f - clipEps && adv < 0)) ? 0.0f : -adv * ratio;
 
                 // Logit Gradients (Actor)
                 float[] dL_dLogits = new float[actionDim];
 
                 // Continuous Pitch/Yaw Gradients through tanh
-                float dLogProb_dMuP = (data.pitchDelta - muPitch) / (actionStd * actionStd);
+                float dLogProb_dMuP = (data.pitchDelta - muPitch) / (stdPitch * stdPitch);
                 float dMuP_dZ0 = 1.0f - (float) Math.pow(Math.tanh(logits[0]), 2);
                 dL_dLogits[0] = dL_dLogProb * dLogProb_dMuP * dMuP_dZ0;
 
-                float dLogProb_dMuY = (data.yawDelta - muYaw) / (actionStd * actionStd);
+                float dLogProb_dMuY = (data.yawDelta - muYaw) / (stdYaw * stdYaw);
                 float dMuY_dZ1 = 1.0f - (float) Math.pow(Math.tanh(logits[1]), 2);
                 dL_dLogits[1] = dL_dLogProb * dLogProb_dMuY * dMuY_dZ1;
+
+                // Accumulate logStd Gradients
+                g_logStd[0] += dL_dLogProb * ((float) Math.pow((data.pitchDelta - muPitch) / stdPitch, 2) - 1.0f);
+                g_logStd[1] += dL_dLogProb * ((float) Math.pow((data.yawDelta - muYaw) / stdYaw, 2) - 1.0f);
 
                 // Discrete Logit Gradients (Categorical Softmax + Entropy)
                 for (int k = 0; k < 7; k++) {
@@ -168,33 +211,47 @@ public class PPOAgent {
                     dL_dHidden[h] = (hiddenRaw[h] > 0) ? sum : 0.0f;
                 }
 
-                // Update Actor Weights & Biases
+                // Accumulate Batch Gradients
                 for (int a = 0; a < actionDim; a++) {
-                    bActor.data[a][0] -= lr * dL_dLogits[a];
+                    g_bA.data[a][0] += dL_dLogits[a] / N;
                     for (int h = 0; h < hiddenDim; h++) {
-                        wActor.data[a][h] -= lr * dL_dLogits[a] * hidden[h];
+                        g_wA.data[a][h] += (dL_dLogits[a] * hidden[h]) / N;
                     }
                 }
 
-                // Update Critic Weights & Biases
-                bCritic.data[0][0] -= lr * dL_dValue;
+                g_bC.data[0][0] += dL_dValue / N;
                 for (int h = 0; h < hiddenDim; h++) {
-                    wCritic.data[0][h] -= lr * dL_dValue * hidden[h];
+                    g_wC.data[0][h] += (dL_dValue * hidden[h]) / N;
                 }
 
-                // Update Input Layer Weights (w1) & Biases (b1)
                 for (int h = 0; h < hiddenDim; h++) {
-                    b1.data[h][0] -= lr * dL_dHidden[h];
+                    g_b1.data[h][0] += dL_dHidden[h] / N;
                     for (int s = 0; s < stateDim; s++) {
-                        w1.data[h][s] -= lr * dL_dHidden[h] * data.state[s];
+                        g_w1.data[h][s] += (dL_dHidden[h] * data.state[s]) / N;
                     }
                 }
             }
-        }
 
-        // Decay exploration noise
-        if (actionStd > minActionStd) {
-            actionStd = Math.max(minActionStd, actionStd * decayRate);
+            // 4. Perform Adam Updates for Network Weights
+            w1.adamUpdate(g_w1, m_w1, v_w1, timeStep, lr, beta1, beta2, eps);
+            b1.adamUpdate(g_b1, m_b1, v_b1, timeStep, lr, beta1, beta2, eps);
+            wActor.adamUpdate(g_wA, m_wA, v_wA, timeStep, lr, beta1, beta2, eps);
+            bActor.adamUpdate(g_bA, m_bA, v_bA, timeStep, lr, beta1, beta2, eps);
+            wCritic.adamUpdate(g_wC, m_wC, v_wC, timeStep, lr, beta1, beta2, eps);
+            bCritic.adamUpdate(g_bC, m_bC, v_bC, timeStep, lr, beta1, beta2, eps);
+
+            // Update logStd via Adam
+            for (int idx = 0; idx < 2; idx++) {
+                float g = g_logStd[idx] / N;
+                m_logStd[idx] = beta1 * m_logStd[idx] + (1.0f - beta1) * g;
+                v_logStd[idx] = beta2 * v_logStd[idx] + (1.0f - beta2) * (g * g);
+                float mHat = m_logStd[idx] / (1.0f - (float) Math.pow(beta1, timeStep));
+                float vHat = v_logStd[idx] / (1.0f - (float) Math.pow(beta2, timeStep));
+                logStd[idx] -= lr * mHat / ((float) Math.sqrt(vHat) + eps);
+                
+                // Clamp logStd to maintain stable exploration bounds
+                logStd[idx] = Math.max(-2.0f, Math.min(0.5f, logStd[idx]));
+            }
         }
     }
 
@@ -202,7 +259,8 @@ public class PPOAgent {
         try {
             Files.createDirectories(path.getParent());
             try (DataOutputStream dos = new DataOutputStream(new FileOutputStream(path.toFile()))) {
-                dos.writeFloat(actionStd);
+                dos.writeInt(timeStep);
+                dos.writeFloat(logStd[0]); dos.writeFloat(logStd[1]);
                 writeMatrix(dos, w1); writeMatrix(dos, b1);
                 writeMatrix(dos, wActor); writeMatrix(dos, bActor);
                 writeMatrix(dos, wCritic); writeMatrix(dos, bCritic);
@@ -213,11 +271,12 @@ public class PPOAgent {
     public void loadBrain(Path path) {
         if (!Files.exists(path)) return;
         try (DataInputStream dis = new DataInputStream(new FileInputStream(path.toFile()))) {
-            actionStd = dis.readFloat();
+            timeStep = dis.readInt();
+            logStd[0] = dis.readFloat(); logStd[1] = dis.readFloat();
             readMatrix(dis, w1); readMatrix(dis, b1);
             readMatrix(dis, wActor); readMatrix(dis, bActor);
             readMatrix(dis, wCritic); readMatrix(dis, bCritic);
-            System.out.println("Loaded AI Brain! Exploration Noise (STD): " + actionStd);
+            System.out.println("Loaded AI Brain with Adam state! Epoch step count: " + timeStep);
         } catch (IOException e) { e.printStackTrace(); }
     }
 
