@@ -8,9 +8,12 @@ import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
 public class NewGen6RLMod implements ClientModInitializer {
+    public static final String MOD_ID = "newgen6";
+
     public static boolean aiEnabled = false;
     public static boolean allowMovement = true;
     public static boolean showHud = true;
@@ -27,18 +30,21 @@ public class NewGen6RLMod implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        // Registers custom category using Identifier / Category static constructor
+        KeyBinding.Category customCategory = KeyBinding.Category.create(Identifier.of(MOD_ID, "rl"));
+
         toggleHudKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.newgen6.toggle_hud",
             InputUtil.Type.KEYSYM,
             GLFW.GLFW_KEY_X,
-            "category.newgen6.rl"
+            customCategory
         ));
 
         toggleAiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.newgen6.toggle_ai",
             InputUtil.Type.KEYSYM,
             GLFW.GLFW_KEY_Z,
-            "category.newgen6.rl"
+            customCategory
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
