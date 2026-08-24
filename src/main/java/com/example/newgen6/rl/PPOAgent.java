@@ -49,6 +49,16 @@ public class PPOAgent {
         this.m_bC = new Matrix(1, 1);                this.v_bC = new Matrix(1, 1);
     }
 
+    // --- Added Getters for HUD ---
+    public float[] getLogStd() {
+        return logStd;
+    }
+
+    public int getTimeStep() {
+        return timeStep;
+    }
+    // ----------------------------
+
     public static class StepData {
         public float[] state; 
         public float pitchDelta, yawDelta; 
@@ -158,7 +168,6 @@ public class PPOAgent {
 
                 float[] dL_dLogits = new float[actionDim];
 
-                // Fixed continuous gradient using cached muPitch/muYaw
                 float dLogProb_dMuP = (data.pitchDelta - muPitch) / (stdPitch * stdPitch);
                 float dMuP_dZ0 = 1.0f - (muPitch * muPitch);
                 dL_dLogits[0] = dL_dLogProb * dLogProb_dMuP * dMuP_dZ0;
@@ -170,7 +179,6 @@ public class PPOAgent {
                 g_logStd[0] += dL_dLogProb * ((float) Math.pow((data.pitchDelta - muPitch) / stdPitch, 2) - 1.0f);
                 g_logStd[1] += dL_dLogProb * ((float) Math.pow((data.yawDelta - muYaw) / stdYaw, 2) - 1.0f);
 
-                // Stable Log-Softmax categorical entropy gradients
                 for (int k = 0; k < 7; k++) {
                     int startIdx = 2 + k * 2;
                     int chosen = data.discreteActions[k];
@@ -213,7 +221,6 @@ public class PPOAgent {
                 }
             }
 
-            // Apply Gradient Clipping to stop numerical explosions
             clipMatrixGradients(g_w1, 1.0f);
             clipMatrixGradients(g_wA, 1.0f);
             clipMatrixGradients(g_wC, 1.0f);
