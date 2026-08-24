@@ -25,20 +25,20 @@ public class NewGen6RLMod implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
-        // Toggle AI Key: C
+        // Toggle AI Key: C (Uses KeyBinding.Category.MISC for 1.21.11 Yarn)
         toggleAiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.newgen6.toggle_ai",
             InputUtil.Type.KEYSYM,
             GLFW.GLFW_KEY_C,
-            "key.categories.misc" // Fixed: Standard Fabric string category
+            KeyBinding.Category.MISC
         ));
 
-        // Toggle HUD Key: X
+        // Toggle HUD Key: X (Uses KeyBinding.Category.MISC for 1.21.11 Yarn)
         toggleHudKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.newgen6.toggle_hud",
             InputUtil.Type.KEYSYM,
             GLFW.GLFW_KEY_X,
-            "key.categories.misc" // Fixed: Standard Fabric string category
+            KeyBinding.Category.MISC
         ));
 
         // Register In-Game HUD Overlay
@@ -63,7 +63,6 @@ public class NewGen6RLMod implements ClientModInitializer {
         }
     }
 
-    // Fixed signature: Accepts RenderTickCounter instead of float tickDelta for MC 1.21+
     private void renderHud(DrawContext context, RenderTickCounter tickCounter) {
         if (!hudActive) return;
 
