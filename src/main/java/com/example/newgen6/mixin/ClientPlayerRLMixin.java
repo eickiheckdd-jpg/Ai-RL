@@ -26,7 +26,6 @@ public abstract class ClientPlayerRLMixin {
 
     @Inject(method = "tick", at = @At("HEAD"))
     private void onClientTick(CallbackInfo ci) {
-        // Only run if the player has toggled the AI ON
         if (!NewGen6RLMod.aiEnabled) return;
 
         ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
@@ -36,22 +35,22 @@ public abstract class ClientPlayerRLMixin {
         LivingEntity target = getNearestTarget(player, client);
         if (target == null) return; 
 
-        // 1. Gather 14D State
-        float[] state = extractState(player, target);
+        // 1. Gather Advanced 21-Dimensional State Vector
+        float[] state = extract21DState(player, target);
 
-        // 2. Network Inference (Continuous & Discrete)
-        float[] continuousActions = new float[2]; // Pitch, Yaw Deltas
-        int[] discreteActions = new int[3];       // Move, Jump, Attack
+        // 2. Action Inference
+        float[] continuousActions = new float[2];
+        int[] discreteActions = new int[3];       
         float[] logProb = new float[1];
         float[] value = new float[1];
         
         NewGen6RLMod.AGENT.selectAction(state, continuousActions, discreteActions, logProb, value);
 
-        // 3. Apply Continuous Mouse & Discrete Key Inputs
+        // 3. Execution
         applyInputs(player, client, continuousActions, discreteActions);
 
-        // 4. Calculate Reward
-        float reward = calculateReward(player, target);
+        // 4. Calculate Enhanced Reward
+        float reward = calculateTacticalReward(player, target);
         boolean done = target.isDead() || player.isDead();
         
         rlMemory.add(new StepData(state, continuousActions[0], continuousActions[1], discreteActions, logProb[0], reward, value[0], done));
@@ -63,24 +62,50 @@ public abstract class ClientPlayerRLMixin {
     }
 
     @Unique
-    private float[] extractState(ClientPlayerEntity p, LivingEntity t) {
+    private float[] extract21DState(ClientPlayerEntity p, LivingEntity t) {
         Vec3d pV = p.getVelocity();
         Vec3d tV = t.getVelocity();
+        
+        // Aim Alignment Calculations
+        double dx = t.getX() - p.getX();
+        double dy = (t.getY() + t.getStandingEyeHeight()) - (p.getY() + p.getStandingEyeHeight());
+        double dz = t.getZ() - p.getZ();
+        double distXZ = Math.sqrt(dx * dx + dz * dz);
+        
+        float targetYaw = (float) (Math.toDegrees(Math.atan2(dz, dx)) - 90.0f);
+        float targetPitch = (float) (-Math.toDegrees(Math.atan2(dy, distXZ)));
+        
+        float yawDiff = MathHelper.wrapDegrees(targetYaw - p.getYaw());
+        float pitchDiff = MathHelper.wrapDegrees(targetPitch - p.getPitch());
+
         return new float[] {
+            // Player Motion (3)
             (float) pV.x, (float) pV.y, (float) pV.z,
-            (float) (t.getX() - p.getX()), (float) (t.getY() - p.getY()), (float) (t.getZ() - p.getZ()),
-            p.getHealth(), p.getAttackCooldownProgress(0.5f), p.distanceTo(t),
-            (float) tV.x, (float) tV.y, (float) tV.z, t.getHealth(), p.isSprinting() ? 1f : 0f
+            // Relative Target Position (3)
+            (float) dx, (float) dy, (float) dz,
+            // Target Motion (3)
+            (float) tV.x, (float) tV.y, (float) tV.z,
+            // Crosshair Alignment Offsets (2)
+            yawDiff / 180f, pitchDiff / 90f,
+            // Healths & Distance (3)
+            p.getHealth() / 20f, t.getHealth() / 20f, p.distanceTo(t) / 10f,
+            // Combat Mechanics (4)
+            p.getAttackCooldownProgress(0.5f),
+            t.hurtTime > 0 ? 1f : 0f, // Target invulnerability ticks
+            p.isOnGround() ? 1f : 0f,
+            p.isSprinting() ? 1f : 0f,
+            // Environment Context (3)
+            p.isSubmergedInWater() ? 1f : 0f,
+            p.horizontalCollision ? 1f : 0f, // Stuck against a wall
+            p.fallDistance > 0 ? 1f : 0f      // In air falling (Potential Critical Hit!)
         };
     }
 
     @Unique
     private void applyInputs(ClientPlayerEntity player, MinecraftClient client, float[] mouseDeltas, int[] keys) {
-        // Continuous Mouse Deltas applied directly
         player.setPitch(MathHelper.clamp(player.getPitch() + mouseDeltas[0], -90f, 90f));
         player.setYaw(player.getYaw() + mouseDeltas[1]);
 
-        // Movement (0=Idle, 1=W, 2=S, 3=A, 4=D)
         client.options.forwardKey.setPressed(keys[0] == 1);
         client.options.backKey.setPressed(keys[0] == 2);
         client.options.leftKey.setPressed(keys[0] == 3);
@@ -88,7 +113,7 @@ public abstract class ClientPlayerRLMixin {
 
         client.options.jumpKey.setPressed(keys[1] == 1);
         
-        if (keys[2] == 1 && player.getAttackCooldownProgress(0.5f) > 0.9f) {
+        if (keys[2] == 1 && player.getAttackCooldownProgress(0.5f) > 0.85f) {
             client.options.attackKey.setPressed(true); 
         } else {
             client.options.attackKey.setPressed(false);
@@ -96,14 +121,40 @@ public abstract class ClientPlayerRLMixin {
     }
 
     @Unique
-    private float calculateReward(ClientPlayerEntity player, LivingEntity target) {
+    private float calculateTacticalReward(ClientPlayerEntity player, LivingEntity target) {
         float reward = 0f;
-        if (target.getHealth() < prevTargetHealth) reward += (prevTargetHealth - target.getHealth()) * 5.0f;
-        if (player.getHealth() < prevSelfHealth) reward -= (prevSelfHealth - player.getHealth()) * 3.0f;
-        float dist = player.distanceTo(target);
-        if (dist > 3.0f) reward -= 0.1f;
-        if (dist < 1.0f) reward -= 0.1f;
+
+        // Damage rewards
+        if (target.getHealth() < prevTargetHealth) {
+            float damageDealt = prevTargetHealth - target.getHealth();
+            reward += damageDealt * 6.0f;
+            
+            // Critical Hit Bonus (hitting while falling)
+            if (player.fallDistance > 0 && !player.isOnGround()) {
+                reward += 2.5f; 
+            }
+        }
         
+        if (player.getHealth() < prevSelfHealth) {
+            reward -= (prevSelfHealth - player.getHealth()) * 4.0f;
+        }
+
+        // Spacing & Distance Management
+        float dist = player.distanceTo(target);
+        if (dist >= 1.8f && dist <= 3.2f) {
+            reward += 0.2f; // Optimal Melee Range
+        } else if (dist > 5.0f) {
+            reward -= 0.3f; // Too far away penalty
+        }
+
+        // Crosshair Aim Precision Reward
+        Vec3d lookDir = player.getRotationVector();
+        Vec3d toTarget = new Vec3d(target.getX() - player.getX(), target.getEyeY() - player.getEyeY(), target.getZ() - player.getZ()).normalize();
+        double dotProduct = lookDir.dotProduct(toTarget);
+        if (dotProduct > 0.9) {
+            reward += 0.15f; // Crosshair is centered on target
+        }
+
         prevTargetHealth = target.getHealth();
         prevSelfHealth = player.getHealth();
         return reward;
