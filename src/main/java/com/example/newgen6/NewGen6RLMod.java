@@ -25,7 +25,14 @@ public class NewGen6RLMod implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        // Load model and restored STDEV state on launch
         AGENT.loadModel("ppo_model.bin");
+
+        // Safety Shutdown Hook: Auto-saves model state when Minecraft is closed
+        Runtime.getRuntime().addShutdownHook(new Thread(() -> {
+            System.out.println("[PPO] Auto-saving model on game exit...");
+            AGENT.saveModel("ppo_model.bin");
+        }));
 
         KeyBinding.Category cat = KeyBinding.Category.create(Identifier.of(MOD_ID, "rl"));
         toggleHudKey = KeyBindingHelper.registerKeyBinding(new KeyBinding("key.hud", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_X, cat));
@@ -43,34 +50,33 @@ public class NewGen6RLMod implements ClientModInitializer {
             }
         });
 
+        // 1.21+ HUD Overlay Integration
         HudElementRegistry.addLast(Identifier.of(MOD_ID, "hud"), (context, tickCounter) -> {
-    MinecraftClient client = MinecraftClient.getInstance();
-    if (!showHud || client.options.hudHidden || client.textRenderer == null) return;
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (!showHud || client.options.hudHidden || client.textRenderer == null) return;
 
-    try {
-        // Safe null check on player/agent context
-        float currentReward = lastReward;
-        float currentStdev = (AGENT != null) ? AGENT.stdev : 0.0f;
+            try {
+                // 1. Background Box (ARGB: 0x90000000 = Translucent black background)
+                context.fill(6, 6, 165, 72, 0x90000000);
+                
+                // 2. Gold Outline Border
+                context.drawBorder(6, 6, 159, 66, 0xFFFFAA00);
 
-        // 1. Draw Background Box (ARGB: 0x90 = Dark semi-transparent background)
-        context.fill(6, 6, 160, 72, 0x90000000);
-        
-        // 2. Optional Outline Border to confirm HUD bounds
-        context.drawBorder(6, 6, 154, 66, 0xFFFFAA00);
+                // 3. Status Lines with Explicit ARGB Hex Colors (0xFF forces full opacity)
+                context.drawText(client.textRenderer, "PPO AI TRAINER", 12, 10, 0xFFFFAA00, false);
 
-        // 3. Render Text Stack (0xFF prefix forces full opacity)
-        context.drawText(client.textRenderer, "PPO AI TRAINER", 12, 10, 0xFFFFAA00, false);
+                String aiStatus = "AI: " + (aiEnabled ? "ON" : "OFF");
+                int aiColor = aiEnabled ? 0xFF55FF55 : 0xFFFF5555;
+                context.drawText(client.textRenderer, aiStatus, 12, 22, aiColor, false);
 
-        String aiStatus = "AI: " + (aiEnabled ? "ON" : "OFF");
-        int aiColor = aiEnabled ? 0xFF55FF55 : 0xFFFF5555;
-        context.drawText(client.textRenderer, aiStatus, 12, 22, aiColor, false);
+                context.drawText(client.textRenderer, String.format("Reward: %.2f", lastReward), 12, 34, 0xFFFFFF55, false);
+                context.drawText(client.textRenderer, String.format("Noise (STDEV): %.3f", AGENT.stdev), 12, 46, 0xFF55FFFF, false);
+                context.drawText(client.textRenderer, "Epsilon: 0.20", 12, 58, 0xFFAAAAFF, false);
 
-        context.drawText(client.textRenderer, String.format("Reward: %.2f", currentReward), 12, 34, 0xFFFFFF55, false);
-        context.drawText(client.textRenderer, String.format("Noise (STDEV): %.3f", currentStdev), 12, 46, 0xFF55FFFF, false);
-        context.drawText(client.textRenderer, "Epsilon: 0.20", 12, 58, 0xFFAAAAFF, false);
-
-    } catch (Exception e) {
-        // Catch any rendering crashes silently to prevent black-box locking
-        e.printStackTrace();
+            } catch (Exception e) {
+                // Prevent HUD rendering exceptions from locking up the UI layer
+                e.printStackTrace();
+            }
+        });
     }
-});
+}
