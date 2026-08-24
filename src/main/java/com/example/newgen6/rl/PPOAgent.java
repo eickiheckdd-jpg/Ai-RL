@@ -74,8 +74,14 @@ public class PPOAgent {
         public boolean done;
 
         public StepData(float[] s, float pd, float yd, int[] da, float lp, float r, float v, boolean d) {
-            this.state = s; this.pitchDelta = pd; this.yawDelta = yd; this.discreteActions = da;
-            this.logProb = lp; this.reward = r; this.value = v; this.done = d;
+            this.state = s.clone();
+            this.pitchDelta = pd; 
+            this.yawDelta = yd; 
+            this.discreteActions = da.clone();
+            this.logProb = lp; 
+            this.reward = r; 
+            this.value = v; 
+            this.done = d;
         }
     }
 
@@ -312,10 +318,10 @@ public class PPOAgent {
         }
     }
 
-    public void saveBrain(Path path) {
+    public synchronized void saveBrain(Path path) {
         try {
             Files.createDirectories(path.getParent());
-            try (DataOutputStream dos = new DataOutputStream(new FileOutputStream(path.toFile()))) {
+            try (DataOutputStream dos = new DataOutputStream(new BufferedOutputStream(new FileOutputStream(path.toFile())))) {
                 dos.writeInt(timeStep); dos.writeInt(adamStep);
                 dos.writeFloat(logStd[0]); dos.writeFloat(logStd[1]);
                 writeMatrix(dos, wBase1); writeMatrix(dos, bBase1);
@@ -323,13 +329,14 @@ public class PPOAgent {
                 writeMatrix(dos, wActor); writeMatrix(dos, bActor);
                 writeMatrix(dos, wCritic1); writeMatrix(dos, bCritic1);
                 writeMatrix(dos, wCritic2); writeMatrix(dos, bCritic2);
+                dos.flush();
             }
         } catch (IOException e) { e.printStackTrace(); }
     }
 
-    public void loadBrain(Path path) {
+    public synchronized void loadBrain(Path path) {
         if (!Files.exists(path)) return;
-        try (DataInputStream dis = new DataInputStream(new FileInputStream(path.toFile()))) {
+        try (DataInputStream dis = new DataInputStream(new BufferedInputStream(new FileInputStream(path.toFile())))) {
             timeStep = dis.readInt(); adamStep = dis.readInt();
             logStd[0] = dis.readFloat(); logStd[1] = dis.readFloat();
             readMatrix(dis, wBase1); readMatrix(dis, bBase1);
