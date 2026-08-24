@@ -18,8 +18,8 @@ import java.util.stream.StreamSupport;
 @Mixin(ClientPlayerEntity.class)
 public abstract class PvPMixin {
     @Unique private static final PPOEngine AGENT = new PPOEngine();
-    @Unique private final float[] state = new float[11];
-    @Unique private final float[] nextState = new float[11];
+    @Unique private final float[] state = new float[13];
+    @Unique private final float[] nextState = new float[13];
     @Unique private final float[] actions = new float[5];
     @Unique private int saveTimer = 0;
 
@@ -28,10 +28,9 @@ public abstract class PvPMixin {
         ClientPlayerEntity p = (ClientPlayerEntity) (Object) this;
         MinecraftClient client = MinecraftClient.getInstance();
 
-        // Null Guard Check
+        // Null Guard & Lifecycle Checks
         if (client.world == null || p.isDead() || p.isRemoved()) return;
 
-        // Select Closest Valid Enemy Target
         PlayerEntity t = StreamSupport.stream(client.world.getEntities().spliterator(), false)
             .filter(e -> e instanceof PlayerEntity && e != p && e.isAlive() && !e.isRemoved() && p.distanceTo(e) <= 16.0f)
             .map(e -> (PlayerEntity) e)
@@ -40,18 +39,15 @@ public abstract class PvPMixin {
 
         if (t == null) return;
 
-        // 1. Extract Current State
         extractState(p, t, state);
-
-        // 2. Continuous Policy Inference
         AGENT.selectAction(state, actions);
 
-        // 3. Raw Continuous Native Control (No hardcoded snaps or aim assist)
-        p.setYaw(p.getYaw() + (actions[0] * 18.0f)); // Pure continuous yaw velocity
+        // Native Continuous Aim Injection
+        p.setYaw(p.getYaw() + (actions[0] * 18.0f)); 
         float targetPitch = p.getPitch() + (actions[1] * 18.0f);
-        p.setPitch(Math.max(-90.0f, Math.min(90.0f, targetPitch))); // Pitch Clamp Guard
+        p.setPitch(Math.max(-90.0f, Math.min(90.0f, targetPitch))); 
 
-        // Native Input Injection
+        // Native Movement & Combat Injection
         p.input.playerInput = new PlayerInput(
             actions[2] > 0.0f,  // W
             actions[2] < -0.3f, // S
@@ -61,14 +57,13 @@ public abstract class PvPMixin {
             actions[3] > 0.0f   // Sprint
         );
         p.setSprinting(actions[3] > 0.0f);
-        client.options.attackKey.setPressed(actions[4] > 0.0f); // Native Left-Click Simulation
+        client.options.attackKey.setPressed(actions[4] > 0.0f); 
 
-        // 4. Extract Next State & Train
         extractState(p, t, nextState);
         float reward = calculateReward(p, t, actions[4] > 0.0f);
         AGENT.trainAsync(state, actions, reward, nextState);
 
-        // 5. Dual-Buffer Auto Save Engine
+        // Auto-Save Management
         saveTimer++;
         if (saveTimer >= 6000 || t.isDead() || p.getHealth() <= 0) {
             AGENT.saveBrainAsync();
@@ -85,14 +80,16 @@ public abstract class PvPMixin {
         out[0] = (float) (t.getX() - p.getX()) / 16.0f;
         out[1] = (float) (t.getY() - p.getY()) / 16.0f;
         out[2] = (float) (t.getZ() - p.getZ()) / 16.0f;
-        out[3] = (float) look.dotProduct(toT);      // Crosshair vector dot product
+        out[3] = (float) look.dotProduct(toT);      
         out[4] = p.getHealth() / 20.0f;
         out[5] = t.getHealth() / 20.0f;
-        out[6] = p.getAttackCooldownProgress(0.0f); // 1.9+ Sword Cooldown
+        out[6] = p.getAttackCooldownProgress(0.0f); 
         out[7] = p.distanceTo(t) / 16.0f;
-        out[8] = (float) relVel.x;
-        out[9] = (float) relVel.y;
-        out[10] = (float) relVel.z;
+        out[8] = (float) relVel.x;                  // Velocity X
+        out[9] = (float) relVel.y;                  // Velocity Y
+        out[10] = (float) relVel.z;                 // Velocity Z
+        out[11] = t.hurtTime / 10.0f;               // Target Invulnerability
+        out[12] = p.hurtTime / 10.0f;               // Self Invulnerability
     }
 
     @Unique
@@ -101,13 +98,14 @@ public abstract class PvPMixin {
         float cd = p.getAttackCooldownProgress(0.0f);
         double dist = p.distanceTo(t);
 
-        // Natural Anti-Spam Penalties & Patience Rewards
         if (clicked) {
-            if (cd < 0.9f) r -= 0.6f;         // Penalty for premature click
-            else if (dist <= 3.0f) r += 1.8f; // Reward for fully charged hit timing
+            if (cd < 0.9f) r -= 0.6f;             // Penalty: Spam clicking
+            else if (t.hurtTime > 0) r -= 0.8f;   // Penalty: Hitting during invulnerability frames
+            else if (dist <= 3.0f) r += 1.8f;     // Reward: Perfect combo timing
         }
-        if (t.hurtTime == 10) r += 10.0f;     // Target damaged
-        if (p.hurtTime == 10) r -= 5.0f;      // Player took damage
+        
+        if (t.hurtTime == 10) r += 10.0f;         
+        if (p.hurtTime == 10) r -= 5.0f;          
         return r;
     }
 }
