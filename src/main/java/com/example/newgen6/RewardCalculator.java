@@ -1,4 +1,4 @@
-package com.example.newgen6.game;
+package com.example.newgen6;
 
 import net.minecraft.entity.player.PlayerEntity;
 
