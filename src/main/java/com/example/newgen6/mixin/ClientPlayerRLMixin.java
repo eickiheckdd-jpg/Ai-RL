@@ -117,12 +117,18 @@ public abstract class ClientPlayerRLMixin {
 
     @Unique
     private void applyInputs(ClientPlayerEntity player, MinecraftClient client, float[] mouseDeltas, int[] keys) {
-        // Bound network outputs to [-1, 1] with tanh and scale to a maximum of 3.0 degrees per tick
-        float maxDegreesPerTick = 3.0f;
+        // Protect against NaN or corrupted float outputs from uninitialized matrix math
+        if (Float.isNaN(mouseDeltas[0]) || Float.isNaN(mouseDeltas[1]) ||
+            Float.isInfinite(mouseDeltas[0]) || Float.isInfinite(mouseDeltas[1])) {
+            return;
+        }
+
+        // Scale normalized [-1.0, 1.0] inputs to a max smooth rotation of 2.5 degrees per tick
+        float maxDegreesPerTick = 2.5f;
         float pitchDelta = (float) Math.tanh(mouseDeltas[0]) * maxDegreesPerTick;
         float yawDelta   = (float) Math.tanh(mouseDeltas[1]) * maxDegreesPerTick;
 
-        // Apply clamped camera rotations
+        // Apply controlled camera angles
         player.setPitch(MathHelper.clamp(player.getPitch() + pitchDelta, -90f, 90f));
         player.setYaw(player.getYaw() + yawDelta);
 
