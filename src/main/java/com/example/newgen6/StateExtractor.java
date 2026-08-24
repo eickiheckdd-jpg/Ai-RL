@@ -1,52 +1,69 @@
-package com.example.newgen6;
+package com.example.newgen6.game;
 
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.util.math.Box;
 import net.minecraft.util.math.Vec3d;
 
+import java.util.List;
+
 public class StateExtractor {
-    public static double[] extractState(MinecraftClient client) {
-        double[] s = new double[11];
-        ClientPlayerEntity self = client.player;
-        if (self == null) return s;
 
-        s[0] = self.getHealth();
-        s[1] = self.getArmor();
-        s[2] = self.fallDistance;
-        s[3] = self.isOnGround() ? 1.0 : 0.0;
-        s[4] = self.isSprinting() ? 1.0 : 0.0;
+    public static final int STATE_SIZE = 11;
+    public static final double SEARCH_RADIUS = 16.0;
+    public static final double MAX_HEALTH = 20.0;
 
-        PlayerEntity opponent = getClosestOpponent(client);
-        if (opponent != null) {
-            Vec3d selfPos = new Vec3d(self.getX(), self.getY(), self.getZ());
-            Vec3d opponentPos = new Vec3d(opponent.getX(), opponent.getY(), opponent.getZ());
-            
-            Vec3d diff = opponentPos.subtract(selfPos);
-            s[5] = diff.x;
-            s[6] = diff.y;
-            s[7] = diff.z;
-            s[8] = diff.length();
-            s[9] = opponent.getHealth();
-            s[10] = opponent.isBlocking() ? 1.0 : 0.0;
-        }
+    public PlayerEntity findOpponent(MinecraftClient client) {
+        if (client.player == null || client.world == null) return null;
+        Box box = client.player.getBoundingBox().expand(SEARCH_RADIUS);
+        List<PlayerEntity> nearby = client.world.getEntitiesByClass(
+                PlayerEntity.class, box, e -> e != client.player && e.isAlive());
 
-        return s;
-    }
-
-    private static PlayerEntity getClosestOpponent(MinecraftClient client) {
-        if (client.world == null || client.player == null) return null;
         PlayerEntity closest = null;
-        double minDist = Double.MAX_VALUE;
-
-        for (PlayerEntity p : client.world.getPlayers()) {
-            if (p == client.player || p.isSpectator()) continue;
+        double closestDistSq = Double.MAX_VALUE;
+        for (PlayerEntity p : nearby) {
             double d = p.squaredDistanceTo(client.player);
-            if (d < minDist) {
-                minDist = d;
+            if (d < closestDistSq) {
+                closestDistSq = d;
                 closest = p;
             }
         }
         return closest;
+    }
+
+    public double[] extract(MinecraftClient client, PlayerEntity opponent) {
+        double[] s = new double[STATE_SIZE];
+        ClientPlayerEntity self = client.player;
+        if (self == null || opponent == null) return s;
+
+        // FIX: Replaced getPos() with getX(), getY(), getZ() to bypass mapping errors
+        Vec3d oppPos = new Vec3d(opponent.getX(), opponent.getY(), opponent.getZ());
+        Vec3d selfPos = new Vec3d(self.getX(), self.getY(), self.getZ());
+        Vec3d diff = oppPos.subtract(selfPos);
+        
+        double distance = diff.length();
+
+        s[0] = clamp(diff.x / SEARCH_RADIUS);
+        s[1] = clamp(diff.y / SEARCH_RADIUS);
+        s[2] = clamp(diff.z / SEARCH_RADIUS);
+        s[3] = clamp(distance / SEARCH_RADIUS);
+        s[4] = normAngle(self.getYaw());
+        s[5] = normAngle(self.getPitch());
+        s[6] = self.getHealth() / MAX_HEALTH;
+        s[7] = opponent.getHealth() / MAX_HEALTH;
+        s[8] = self.isOnGround() ? 1.0 : 0.0;
+        s[9] = self.canSee(opponent) ? 1.0 : 0.0;
+        s[10] = self.getAttackCooldownProgress(0.0f);
+        return s;
+    }
+
+    private double clamp(double v) {
+        return Math.max(-1.0, Math.min(1.0, v));
+    }
+
+    private double normAngle(float deg) {
+        double d = ((deg + 180) % 360 + 360) % 360 - 180;
+        return d / 180.0;
     }
 }
