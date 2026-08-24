@@ -52,6 +52,12 @@ public abstract class ClientPlayerRLMixin {
 
         rlMemory.add(new StepData(state, continuousActions[0], continuousActions[1], discreteActions, logProb[0], reward, value[0], done));
 
+        // Update HUD metrics
+        NewGen6RLMod.lastReward = reward;
+        NewGen6RLMod.currentStdPitch = (float) Math.exp(NewGen6RLMod.AGENT.getLogStd()[0]);
+        NewGen6RLMod.currentStdYaw = (float) Math.exp(NewGen6RLMod.AGENT.getLogStd()[1]);
+        NewGen6RLMod.trainingStep = NewGen6RLMod.AGENT.getTimeStep();
+
         if (rlMemory.size() >= 128 || done) {
             NewGen6RLMod.AGENT.train(rlMemory);
             rlMemory.clear();
@@ -150,6 +156,7 @@ public abstract class ClientPlayerRLMixin {
             client.options.sprintKey.setPressed(false);
         }
 
+        // Unrestricted attack input (AI can swing at air, blocks, or entities freely)
         client.options.attackKey.setPressed(keys[6] == 1);
     }
 
@@ -160,7 +167,6 @@ public abstract class ClientPlayerRLMixin {
             return 0f;
         }
 
-        // 1. Precise Vector Crosshair Alignment (-1.0 to 1.0)
         Vec3d lookDir = player.getRotationVector();
         Vec3d toTarget = new Vec3d(
             target.getX() - player.getX(), 
@@ -171,21 +177,17 @@ public abstract class ClientPlayerRLMixin {
 
         float reward = 0f;
 
-        // 2. Exponential Shaping: heavily rewards getting dead-center, penalizes looking away
+        // Exponential tracking shaping
         if (alignment > 0.0f) {
             reward += (float) Math.pow(alignment, 4.0) * 0.4f;
         } else {
             reward -= 0.05f; 
         }
 
-        // 3. Precision Attack Incentive: Gated directly by crosshair alignment
+        // Pure positive incentive for successful attack timing (no whiff penalties)
         boolean isAttacking = (discreteActions[6] == 1);
-        if (isAttacking) {
-            if (alignment > 0.85f) {
-                reward += 1.5f; // Hit target cleanly
-            } else {
-                reward -= 0.5f; // Whiffed / attacked empty space
-            }
+        if (isAttacking && alignment > 0.85f) {
+            reward += 2.0f; 
         }
 
         return reward;
