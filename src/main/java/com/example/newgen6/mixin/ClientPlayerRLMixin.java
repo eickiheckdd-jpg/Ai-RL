@@ -19,7 +19,6 @@ import java.util.stream.StreamSupport;
 @Mixin(ClientPlayerEntity.class)
 public abstract class ClientPlayerRLMixin {
     @Unique private PlayerEntity lockedTarget = null;
-    // Fixed size: 12 elements
     @Unique private final float[] stateBuffer = new float[12];
     @Unique private final float[] actionBuffer = new float[8];
 
@@ -63,7 +62,7 @@ public abstract class ClientPlayerRLMixin {
         out[0] = (float) (dx / 16.0);
         out[1] = (float) (dy / 16.0);
         out[2] = (float) (dz / 16.0);
-        
+
         // Velocity
         out[3] = (float) pV.x;
         out[4] = (float) pV.y;
@@ -82,22 +81,31 @@ public abstract class ClientPlayerRLMixin {
 
     @Unique
     private void applyInputs(ClientPlayerEntity player, MinecraftClient client, float[] actions) {
-        double mult = Math.pow(client.options.getMouseSensitivity().getValue() * 0.6 + 0.2, 3) * 8.0;
-        player.changeLookDirection(actions[1] * mult, actions[0] * mult);
+        // Safe, human-like rotation capping
+        // actionBuffer elements are [-1.0, 1.0]. Scaling by 3.0 gives smooth 3-degree movements per tick.
+        double yawDelta = Math.max(-6.0, Math.min(6.0, actions[0] * 3.0));   // Action 0 = Yaw (Left/Right)
+        double pitchDelta = Math.max(-6.0, Math.min(6.0, actions[1] * 3.0)); // Action 1 = Pitch (Up/Down)
 
+        // Correct cursor order: (Yaw Delta, Pitch Delta)
+        player.changeLookDirection(yawDelta, pitchDelta);
+
+        // Movement & Actions
         player.input.playerInput = new PlayerInput(
-            actions[2] > 0, 
-            actions[2] < 0, 
-            actions[3] < 0, 
-            actions[3] > 0, 
-            actions[4] > 0, 
-            actions[7] > 0, 
-            actions[5] > 0
+            actions[2] > 0,   // Forward
+            actions[2] < 0,   // Back
+            actions[3] < 0,   // Left
+            actions[3] > 0,   // Right
+            actions[4] > 0,   // Jump
+            actions[7] > 0,   // Sneak
+            actions[5] > 0    // Sprint
         );
         player.setSprinting(actions[5] > 0);
 
+        // Attack Logic
         if (actions[6] > 0.5f && isLookingAtBox(player, lockedTarget)) {
-            client.interactionManager.attackEntity(player, lockedTarget);
+            if (client.interactionManager != null) {
+                client.interactionManager.attackEntity(player, lockedTarget);
+            }
             player.swingHand(Hand.MAIN_HAND);
         }
     }
