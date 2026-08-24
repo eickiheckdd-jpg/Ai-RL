@@ -44,21 +44,26 @@ public class NewGen6RLMod implements ClientModInitializer {
         });
 
         HudElementRegistry.addLast(Identifier.of(MOD_ID, "hud"), (context, tickCounter) -> {
-            MinecraftClient client = MinecraftClient.getInstance();
-            if (!showHud || client.options.hudHidden || client.textRenderer == null) return;
+    MinecraftClient client = MinecraftClient.getInstance();
+    if (!showHud || client.options.hudHidden || client.textRenderer == null) return;
 
-            // 1. Draw Translucent Background Box
-            context.fill(6, 6, 155, 48, 0x90000000);
+    // 1. Draw Translucent Background (ARGB: 0x80 = ~50% Alpha, 0x101010 = Dark Grey)
+    int backgroundColor = 0x80101010; 
+    context.fill(6, 6, 155, 48, backgroundColor);
 
-            // 2. Draw Text Layers directly on top using the 1.21+ DrawContext signature
-            context.drawText(client.textRenderer, Text.literal("PPO AI TRAINER"), 10, 10, 0xFFAA00, true);
-            
-            Text aiStatusText = Text.literal("AI: " + (aiEnabled ? "ON" : "OFF"));
-            int aiColor = aiEnabled ? 0x55FF55 : 0xFF5555;
-            context.drawText(client.textRenderer, aiStatusText, 10, 22, aiColor, true);
+    // 2. Draw Borders for better visual clarity
+    context.drawBorder(6, 6, 149, 42, 0xFFFFAA00);
 
-            Text rewardText = Text.literal(String.format("Reward: %.2f", lastReward));
-            context.drawText(client.textRenderer, rewardText, 10, 34, 0xFFFF55, true);
-        });
-    }
-}
+    // 3. Render Text Layers with explicit ARGB Hex Colors
+    // Title: Gold (0xFFFF00 / ARGB: 0xFFFFAA00)
+    context.drawText(client.textRenderer, Text.literal("PPO AI TRAINER"), 12, 10, 0xFFFFAA00, false);
+
+    // AI Status: Green (ON) / Red (OFF)
+    String aiStatus = "AI: " + (aiEnabled ? "ON" : "OFF");
+    int aiColor = aiEnabled ? 0xFF55FF55 : 0xFFFF5555;
+    context.drawText(client.textRenderer, Text.literal(aiStatus), 12, 22, aiColor, false);
+
+    // Reward: Yellow
+    String rewardStr = String.format("Reward: %.2f", lastReward);
+    context.drawText(client.textRenderer, Text.literal(rewardStr), 12, 34, 0xFFFFFF55, false);
+});
