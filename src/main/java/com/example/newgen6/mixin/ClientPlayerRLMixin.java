@@ -16,6 +16,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
+import java.util.stream.StreamSupport;
 
 @Mixin(ClientPlayerEntity.class)
 public abstract class ClientPlayerRLMixin {
@@ -35,10 +36,8 @@ public abstract class ClientPlayerRLMixin {
         LivingEntity target = getNearestTarget(player, client);
         if (target == null) return; 
 
-        // 1. Gather Advanced 21-Dimensional State Vector
         float[] state = extract21DState(player, target);
 
-        // 2. Action Inference
         float[] continuousActions = new float[2];
         int[] discreteActions = new int[3];       
         float[] logProb = new float[1];
@@ -46,10 +45,8 @@ public abstract class ClientPlayerRLMixin {
         
         NewGen6RLMod.AGENT.selectAction(state, continuousActions, discreteActions, logProb, value);
 
-        // 3. Execution
         applyInputs(player, client, continuousActions, discreteActions);
 
-        // 4. Calculate Enhanced Reward
         float reward = calculateTacticalReward(player, target);
         boolean done = target.isDead() || player.isDead();
         
@@ -66,7 +63,6 @@ public abstract class ClientPlayerRLMixin {
         Vec3d pV = p.getVelocity();
         Vec3d tV = t.getVelocity();
         
-        // Aim Alignment Calculations
         double dx = t.getX() - p.getX();
         double dy = (t.getY() + t.getStandingEyeHeight()) - (p.getY() + p.getStandingEyeHeight());
         double dz = t.getZ() - p.getZ();
@@ -79,25 +75,18 @@ public abstract class ClientPlayerRLMixin {
         float pitchDiff = MathHelper.wrapDegrees(targetPitch - p.getPitch());
 
         return new float[] {
-            // Player Motion (3)
             (float) pV.x, (float) pV.y, (float) pV.z,
-            // Relative Target Position (3)
             (float) dx, (float) dy, (float) dz,
-            // Target Motion (3)
             (float) tV.x, (float) tV.y, (float) tV.z,
-            // Crosshair Alignment Offsets (2)
             yawDiff / 180f, pitchDiff / 90f,
-            // Healths & Distance (3)
             p.getHealth() / 20f, t.getHealth() / 20f, p.distanceTo(t) / 10f,
-            // Combat Mechanics (4)
             p.getAttackCooldownProgress(0.5f),
-            t.hurtTime > 0 ? 1f : 0f, // Target invulnerability ticks
+            t.hurtTime > 0 ? 1f : 0f, 
             p.isOnGround() ? 1f : 0f,
             p.isSprinting() ? 1f : 0f,
-            // Environment Context (3)
             p.isSubmergedInWater() ? 1f : 0f,
-            p.horizontalCollision ? 1f : 0f, // Stuck against a wall
-            p.fallDistance > 0 ? 1f : 0f      // In air falling (Potential Critical Hit!)
+            p.horizontalCollision ? 1f : 0f, 
+            p.fallDistance > 0 ? 1f : 0f      
         };
     }
 
@@ -124,12 +113,10 @@ public abstract class ClientPlayerRLMixin {
     private float calculateTacticalReward(ClientPlayerEntity player, LivingEntity target) {
         float reward = 0f;
 
-        // Damage rewards
         if (target.getHealth() < prevTargetHealth) {
             float damageDealt = prevTargetHealth - target.getHealth();
             reward += damageDealt * 6.0f;
             
-            // Critical Hit Bonus (hitting while falling)
             if (player.fallDistance > 0 && !player.isOnGround()) {
                 reward += 2.5f; 
             }
@@ -139,20 +126,18 @@ public abstract class ClientPlayerRLMixin {
             reward -= (prevSelfHealth - player.getHealth()) * 4.0f;
         }
 
-        // Spacing & Distance Management
         float dist = player.distanceTo(target);
         if (dist >= 1.8f && dist <= 3.2f) {
-            reward += 0.2f; // Optimal Melee Range
+            reward += 0.2f; 
         } else if (dist > 5.0f) {
-            reward -= 0.3f; // Too far away penalty
+            reward -= 0.3f; 
         }
 
-        // Crosshair Aim Precision Reward
         Vec3d lookDir = player.getRotationVector();
         Vec3d toTarget = new Vec3d(target.getX() - player.getX(), target.getEyeY() - player.getEyeY(), target.getZ() - player.getZ()).normalize();
         double dotProduct = lookDir.dotProduct(toTarget);
         if (dotProduct > 0.9) {
-            reward += 0.15f; // Crosshair is centered on target
+            reward += 0.15f; 
         }
 
         prevTargetHealth = target.getHealth();
@@ -162,7 +147,7 @@ public abstract class ClientPlayerRLMixin {
 
     @Unique
     private LivingEntity getNearestTarget(ClientPlayerEntity player, MinecraftClient client) {
-        return (LivingEntity) client.world.getEntities().stream()
+        return (LivingEntity) StreamSupport.stream(client.world.getEntities().spliterator(), false)
             .filter(e -> e instanceof LivingEntity && e != player && e.isAlive())
             .min(Comparator.comparingDouble(player::distanceTo))
             .orElse(null);
