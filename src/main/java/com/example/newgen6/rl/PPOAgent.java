@@ -49,15 +49,15 @@ public class PPOAgent {
         float[] logits = matmulAdd(wActor, hidden, bActor);
         valueOut[0] = matmulAdd(wCritic, hidden, bCritic)[0];
 
-        // Tanh bounded continuous pitch/yaw deltas
-        float muPitch = (float) Math.tanh(logits[0]) * 25f;
-        float muYaw = (float) Math.tanh(logits[1]) * 35f;
+        // Tanh bounded continuous outputs normalized in range [-1.0, 1.0]
+        float muPitch = (float) Math.tanh(logits[0]);
+        float muYaw = (float) Math.tanh(logits[1]);
 
         continuousOut[0] = (float) (muPitch + rng.nextGaussian() * actionStd);
         continuousOut[1] = (float) (muYaw + rng.nextGaussian() * actionStd);
 
         float logProbDiscreteAcc = 0.0f;
-        
+
         // 7 Binary discrete heads: logits [2..15]
         for (int k = 0; k < 7; k++) {
             float[] probs = softmax(slice(logits, 2 + k * 2, 4 + k * 2));
@@ -101,8 +101,8 @@ public class PPOAgent {
                 float[] logits = matmulAdd(wActor, hidden, bActor);
                 float valuePred = matmulAdd(wCritic, hidden, bCritic)[0];
 
-                float muPitch = (float) Math.tanh(logits[0]) * 25f;
-                float muYaw = (float) Math.tanh(logits[1]) * 35f;
+                float muPitch = (float) Math.tanh(logits[0]);
+                float muYaw = (float) Math.tanh(logits[1]);
 
                 float curLogProbCont = -0.5f * (float) (
                     Math.pow((data.pitchDelta - muPitch) / actionStd, 2) + 
@@ -133,11 +133,11 @@ public class PPOAgent {
 
                 // Continuous Pitch/Yaw Gradients through tanh
                 float dLogProb_dMuP = (data.pitchDelta - muPitch) / (actionStd * actionStd);
-                float dMuP_dZ0 = 25f * (1.0f - (float) Math.pow(Math.tanh(logits[0]), 2));
+                float dMuP_dZ0 = 1.0f - (float) Math.pow(Math.tanh(logits[0]), 2);
                 dL_dLogits[0] = dL_dLogProb * dLogProb_dMuP * dMuP_dZ0;
 
                 float dLogProb_dMuY = (data.yawDelta - muYaw) / (actionStd * actionStd);
-                float dMuY_dZ1 = 35f * (1.0f - (float) Math.pow(Math.tanh(logits[1]), 2));
+                float dMuY_dZ1 = 1.0f - (float) Math.pow(Math.tanh(logits[1]), 2);
                 dL_dLogits[1] = dL_dLogProb * dLogProb_dMuY * dMuY_dZ1;
 
                 // Discrete Logit Gradients (Categorical Softmax + Entropy)
@@ -163,7 +163,7 @@ public class PPOAgent {
                         sum += wActor.data[a][h] * dL_dLogits[a];
                     }
                     sum += wCritic.data[0][h] * dL_dValue;
-                    
+
                     // ReLU Derivative
                     dL_dHidden[h] = (hiddenRaw[h] > 0) ? sum : 0.0f;
                 }
