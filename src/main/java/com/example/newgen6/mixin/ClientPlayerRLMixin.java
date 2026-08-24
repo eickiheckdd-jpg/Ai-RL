@@ -41,7 +41,7 @@ public abstract class ClientPlayerRLMixin {
         float[] state = extract30DState(player, target);
 
         float[] continuousActions = new float[2];
-        int[] discreteActions = new int[7]; // [W, S, A, D, Jump, Sprint, Attack]
+        int[] discreteActions = new int[7]; 
         float[] logProb = new float[1];
         float[] value = new float[1];
 
@@ -77,7 +77,6 @@ public abstract class ClientPlayerRLMixin {
         float yawDiff = MathHelper.wrapDegrees(targetYaw - p.getYaw());
         float pitchDiff = MathHelper.wrapDegrees(targetPitch - p.getPitch());
 
-        // Facing vectors and alignment
         Vec3d targetLook = t.getRotationVector();
         Vec3d toPlayer = new Vec3d(-dx, -dy, -dz).normalize();
         double targetFacingDot = targetLook.dotProduct(toPlayer);
@@ -90,25 +89,33 @@ public abstract class ClientPlayerRLMixin {
         double closingSpeed = relVel.dotProduct(toTarget);
 
         return new float[] {
-            (float) pV.x, (float) pV.y, (float) pV.z,
-            (float) dx, (float) dy, (float) dz,
-            (float) tV.x, (float) tV.y, (float) tV.z,
-            yawDiff / 180f, pitchDiff / 90f,
+            MathHelper.clamp((float) pV.x, -1f, 1f),
+            MathHelper.clamp((float) pV.y, -1f, 1f),
+            MathHelper.clamp((float) pV.z, -1f, 1f),
+            MathHelper.clamp((float) (dx / 16.0), -1f, 1f),
+            MathHelper.clamp((float) (dy / 16.0), -1f, 1f),
+            MathHelper.clamp((float) (dz / 16.0), -1f, 1f),
+            MathHelper.clamp((float) tV.x, -1f, 1f),
+            MathHelper.clamp((float) tV.y, -1f, 1f),
+            MathHelper.clamp((float) tV.z, -1f, 1f),
+            yawDiff / 180f, 
+            pitchDiff / 90f,
             (float) targetFacingDot,
-            p.getHealth() / 20f, t.getHealth() / 20f,
-            (float) (dist / 10f),
-            (float) closingSpeed,
+            p.getHealth() / 20f, 
+            t.getHealth() / 20f,
+            MathHelper.clamp((float) (dist / 16.0), 0f, 1f),
+            MathHelper.clamp((float) (closingSpeed / 5.0), -1f, 1f),
             p.getAttackCooldownProgress(0.5f),
-            t.hurtTime / 10f, // Critical for W-tapping (i-frames detection)
+            t.hurtTime / 10f,
             t.isOnGround() ? 1f : 0f,
             p.isOnGround() ? 1f : 0f,
             p.isSprinting() ? 1f : 0f,
             p.isSubmergedInWater() ? 1f : 0f,
             p.horizontalCollision ? 1f : 0f,
-            (float) (p.fallDistance / 5.0),
+            MathHelper.clamp((float) (p.fallDistance / 5.0), 0f, 1f),
             p.handSwinging ? 1f : 0f,
-            (float) (t.fallDistance / 5.0),
-            (float) Math.sqrt(tV.x * tV.x + tV.z * tV.z),
+            MathHelper.clamp((float) (t.fallDistance / 5.0), 0f, 1f),
+            MathHelper.clamp((float) Math.sqrt(tV.x * tV.x + tV.z * tV.z), 0f, 1f),
             t.isSprinting() ? 1f : 0f,
             (float) playerLookDot,
             p.isUsingItem() ? 1f : 0f
@@ -117,24 +124,19 @@ public abstract class ClientPlayerRLMixin {
 
     @Unique
     private void applyInputs(ClientPlayerEntity player, MinecraftClient client, float[] mouseDeltas, int[] keys) {
-        // Protect against NaN or corrupted float outputs from uninitialized matrix math
         if (Float.isNaN(mouseDeltas[0]) || Float.isNaN(mouseDeltas[1]) ||
             Float.isInfinite(mouseDeltas[0]) || Float.isInfinite(mouseDeltas[1])) {
             return;
         }
 
-        // Scale normalized [-1.0, 1.0] inputs to a max smooth rotation of 2.5 degrees per tick
         float maxDegreesPerTick = 2.5f;
         float pitchDelta = (float) Math.tanh(mouseDeltas[0]) * maxDegreesPerTick;
         float yawDelta   = (float) Math.tanh(mouseDeltas[1]) * maxDegreesPerTick;
 
-        // Apply controlled camera angles
         player.setPitch(MathHelper.clamp(player.getPitch() + pitchDelta, -90f, 90f));
         player.setYaw(player.getYaw() + yawDelta);
 
-        // Curriculum Masking
         if (NewGen6RLMod.allowMovement) {
-            // Stage 2: Full Movement Allowed
             client.options.forwardKey.setPressed(keys[0] == 1);
             client.options.backKey.setPressed(keys[1] == 1);
             client.options.leftKey.setPressed(keys[2] == 1);
@@ -142,7 +144,6 @@ public abstract class ClientPlayerRLMixin {
             client.options.jumpKey.setPressed(keys[4] == 1);
             client.options.sprintKey.setPressed(keys[5] == 1);
         } else {
-            // Stage 1: Movement Disabled (Force release movement keys)
             client.options.forwardKey.setPressed(false);
             client.options.backKey.setPressed(false);
             client.options.leftKey.setPressed(false);
@@ -151,7 +152,6 @@ public abstract class ClientPlayerRLMixin {
             client.options.sprintKey.setPressed(false);
         }
 
-        // Attacking is always allowed
         client.options.attackKey.setPressed(keys[6] == 1);
     }
 
@@ -159,7 +159,6 @@ public abstract class ClientPlayerRLMixin {
     private float calculateTacticalReward(ClientPlayerEntity player, LivingEntity target) {
         float reward = 0f;
 
-        // Reset target health baselines on target change
         if (lastTargetUuid == null || !lastTargetUuid.equals(target.getUuid())) {
             lastTargetUuid = target.getUuid();
             prevTargetHealth = target.getHealth();
@@ -169,35 +168,29 @@ public abstract class ClientPlayerRLMixin {
 
         float currentDist = player.distanceTo(target);
 
-        // Damage Dealt Reward
         if (target.getHealth() < prevTargetHealth) {
             float damageDealt = prevTargetHealth - target.getHealth();
             reward += damageDealt * 8.0f;
 
-            // Critical Hit Bonus (landing hits while falling)
             if (player.fallDistance > 0 && !player.isOnGround()) {
                 reward += 3.0f;
             }
 
-            // Sprint-Reset Knockback Reward
             if (player.isSprinting()) {
                 reward += 2.0f;
             }
         }
 
-        // Damage Taken Penalty
         if (player.getHealth() < prevSelfHealth) {
             reward -= (prevSelfHealth - player.getHealth()) * 6.0f;
         }
 
-        // Sword Reach Spacing Reward (2.0 - 3.2 blocks)
         if (currentDist >= 2.0f && currentDist <= 3.2f) {
             reward += 0.2f;
         } else if (currentDist > 4.5f) {
             reward -= 0.1f;
         }
 
-        // Crosshair Aim Alignment Bonus
         Vec3d lookDir = player.getRotationVector();
         Vec3d toTarget = new Vec3d(target.getX() - player.getX(), target.getEyeY() - player.getEyeY(), target.getZ() - player.getZ()).normalize();
         double dot = lookDir.dotProduct(toTarget);
@@ -205,7 +198,6 @@ public abstract class ClientPlayerRLMixin {
             reward += 0.1f;
         }
 
-        // Penalty for attack spamming during target i-frames
         if (target.hurtTime > 0 && player.getAttackCooldownProgress(0.5f) < 0.8f) {
             reward -= 0.15f;
         }
