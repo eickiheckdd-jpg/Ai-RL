@@ -26,7 +26,7 @@ public abstract class ClientPlayerRLMixin {
 
     @Inject(method = "tick", at = @At("HEAD"))
     private void onClientTick(CallbackInfo ci) {
-        // --- ADD THIS CHECK ---
+        // Only run if the player has toggled the AI ON
         if (!NewGen6RLMod.aiEnabled) return;
 
         ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
