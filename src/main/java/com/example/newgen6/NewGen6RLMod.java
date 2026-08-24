@@ -4,7 +4,7 @@ import com.example.newgen6.rl.PPOAgent;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.HudElementRegistry;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
@@ -43,12 +43,15 @@ public class NewGen6RLMod implements ClientModInitializer {
             }
         });
 
-        HudRenderCallback.EVENT.register((drawContext, tick) -> {
-            if (!showHud || MinecraftClient.getInstance().options.hudHidden) return;
-            drawContext.fill(6, 6, 165, 50, 0x90000000);
-            drawContext.drawText(MinecraftClient.getInstance().textRenderer, Text.literal("§6PPO AI TRAINER"), 10, 10, 0xFFFFFF, true);
-            drawContext.drawText(MinecraftClient.getInstance().textRenderer, Text.literal("AI: " + (aiEnabled ? "§aON" : "§cOFF")), 10, 22, 0xFFFFFF, true);
-            drawContext.drawText(MinecraftClient.getInstance().textRenderer, Text.literal(String.format("Reward: §e%.2f", lastReward)), 10, 34, 0xFFFFFF, true);
+        // Use HudElementRegistry instead of HudRenderCallback for 1.21.6+
+        HudElementRegistry.addLast(Identifier.of(MOD_ID, "hud"), (context, tickCounter) -> {
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (!showHud || client.options.hudHidden || client.textRenderer == null) return;
+            
+            context.fill(6, 6, 165, 50, 0x90000000);
+            context.drawTextWithShadow(client.textRenderer, Text.literal("PPO AI TRAINER"), 10, 10, 0xFFAA00);
+            context.drawTextWithShadow(client.textRenderer, Text.literal("AI: " + (aiEnabled ? "ON" : "OFF")), 10, 22, aiEnabled ? 0x55FF55 : 0xFF5555);
+            context.drawTextWithShadow(client.textRenderer, Text.literal(String.format("Reward: %.2f", lastReward)), 10, 34, 0xFFFF55);
         });
     }
 }
