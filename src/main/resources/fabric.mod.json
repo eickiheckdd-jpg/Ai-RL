@@ -13,6 +13,9 @@
       "com.example.newgen6.NewGen6RLMod"
     ]
   },
+  "mixins": [
+    "newgen6.mixins.json"
+  ],
   "depends": {
     "fabricloader": ">=0.18.0",
     "minecraft": "~1.21.11",
