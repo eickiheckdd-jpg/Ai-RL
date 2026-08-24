@@ -31,10 +31,9 @@ public abstract class PvPMixin {
 
         if (client.world == null || p.isDead() || p.isRemoved()) return;
 
-        // Process Key Press Input for 'C'
-        NewGen6RLMod.checkToggle(client);
+        // Process C and X keys
+        NewGen6RLMod.checkToggles(client);
 
-        // If AI is toggled OFF, bypass AI logic so you keep manual control
         if (!NewGen6RLMod.aiActive) return;
 
         PlayerEntity t = StreamSupport.stream(client.world.getEntities().spliterator(), false)
@@ -48,19 +47,23 @@ public abstract class PvPMixin {
         extractState(p, t, state);
         AGENT.selectAction(state, actions);
 
-        // Pitch and Yaw Control
+        // Update HUD Metrics
+        System.arraycopy(actions, 0, NewGen6RLMod.lastActions, 0, actions.length);
+        NewGen6RLMod.currentNoise = AGENT.stdev;
+
+        // Apply Aim Inputs
         p.setYaw(p.getYaw() + (actions[0] * 18.0f)); 
         p.setPitch(Math.max(-90.0f, Math.min(90.0f, p.getPitch() + (actions[1] * 18.0f)))); 
 
-        // Input Injection
+        // Inject Movement Inputs
         p.input.playerInput = new PlayerInput(
-            actions[2] > 0.0f,   // Forward
-            actions[2] < -0.3f,  // Backward
-            actions[5] > 0.2f,   // Strafe Left
-            actions[6] > 0.2f,   // Strafe Right
-            actions[3] > 0.5f,   // Jump
-            false,               // Sneak
-            actions[2] > 0.5f    // Sprint
+            actions[2] > 0.0f,   
+            actions[2] < -0.3f,  
+            actions[5] > 0.2f,   
+            actions[6] > 0.2f,   
+            actions[3] > 0.5f,   
+            false,               
+            actions[2] > 0.5f    
         );
         p.setSprinting(actions[2] > 0.5f);
 
@@ -69,6 +72,8 @@ public abstract class PvPMixin {
 
         extractState(p, t, nextState);
         float reward = calculateReward(p, t, isAttacking);
+        NewGen6RLMod.lastReward = reward;
+
         AGENT.trainAsync(state, actions, reward, nextState);
 
         saveTimer++;
