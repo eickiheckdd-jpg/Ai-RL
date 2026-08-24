@@ -6,7 +6,6 @@ import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.loader.api.FabricLoader;
 import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
 import net.minecraft.text.Text;
 import org.lwjgl.glfw.GLFW;
 
@@ -29,7 +28,6 @@ public class NewGen6RLMod implements ClientModInitializer {
         // Keybind 'C' to toggle overall AI state
         toggleAiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.newgen6.toggle", 
-            InputUtil.Type.KEYSYM, 
             GLFW.GLFW_KEY_C, 
             "key.category.newgen6.title"
         ));
@@ -37,7 +35,6 @@ public class NewGen6RLMod implements ClientModInitializer {
         // Keybind 'V' to toggle Curriculum Stage (Movement On/Off)
         toggleMovementKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.newgen6.toggle_movement", 
-            InputUtil.Type.KEYSYM, 
             GLFW.GLFW_KEY_V, 
             "key.category.newgen6.title"
         ));
