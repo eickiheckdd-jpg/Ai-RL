@@ -4,7 +4,8 @@ import com.example.newgen6.NewGen6RLMod;
 import com.example.newgen6.rl.PPOAgent.StepData;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
-import net.minecraft.entity.LivingEntity;
+import net.minecraft.client.network.OtherClientPlayerEntity;
+import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.PlayerInput;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
@@ -24,7 +25,7 @@ import java.util.stream.StreamSupport;
 public abstract class ClientPlayerRLMixin {
 
     @Unique private final List<StepData> rlMemory = new ArrayList<>();
-    @Unique private LivingEntity lockedTarget = null;
+    @Unique private PlayerEntity lockedTarget = null;
     @Unique private boolean isTraining = false;
 
     @Inject(method = "tick", at = @At("HEAD"))
@@ -34,8 +35,9 @@ public abstract class ClientPlayerRLMixin {
         ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
         MinecraftClient client = MinecraftClient.getInstance();
 
-        if (client.world == null || client.isPaused() || player.isDead()) {
+        if (client.world == null || client.isPaused() || player.isDead() || player.isRemoved()) {
             rlMemory.clear();
+            lockedTarget = null;
             return;
         }
 
@@ -54,7 +56,7 @@ public abstract class ClientPlayerRLMixin {
         applyInputsDirect(player, client, continuousActions, discreteActions);
 
         float reward = calculateTacticalReward(player, lockedTarget, discreteActions);
-        boolean done = lockedTarget.isDead() || player.isDead();
+        boolean done = lockedTarget.isDead() || lockedTarget.isRemoved() || player.isDead();
 
         rlMemory.add(new StepData(state.clone(), continuousActions[0], continuousActions[1], discreteActions.clone(), logProb[0], reward, value[0], done));
 
@@ -80,17 +82,20 @@ public abstract class ClientPlayerRLMixin {
 
     @Unique
     private void updateTargetLock(ClientPlayerEntity player, MinecraftClient client) {
-        if (lockedTarget != null && lockedTarget.isAlive() && player.distanceTo(lockedTarget) <= 16.0f) {
+        if (lockedTarget != null && lockedTarget.isAlive() && !lockedTarget.isRemoved() && player.distanceTo(lockedTarget) <= 16.0f) {
             return; 
         }
-        lockedTarget = (LivingEntity) StreamSupport.stream(client.world.getEntities().spliterator(), false)
-            .filter(e -> e instanceof LivingEntity && e != player && e.isAlive() && player.distanceTo(e) <= 16.0f)
+        
+        // Locks strictly onto other player entities
+        lockedTarget = StreamSupport.stream(client.world.getEntities().spliterator(), false)
+            .filter(e -> e instanceof PlayerEntity && e != player && e.isAlive() && !e.isRemoved() && player.distanceTo(e) <= 16.0f)
+            .map(e -> (PlayerEntity) e)
             .min(Comparator.comparingDouble(player::distanceTo))
             .orElse(null);
     }
 
     @Unique
-    private float[] extract30DState(ClientPlayerEntity p, LivingEntity t) {
+    private float[] extract30DState(ClientPlayerEntity p, PlayerEntity t) {
         Vec3d pV = p.getVelocity();
         Vec3d tV = t.getVelocity();
 
@@ -162,18 +167,16 @@ public abstract class ClientPlayerRLMixin {
         player.setPitch(MathHelper.clamp(player.getPitch() + pitchDelta, -90f, 90f));
         player.setYaw(player.getYaw() + yawDelta);
 
-        if (NewGen6RLMod.allowMovement) {
-            boolean forward = keys[0] == 1;
-            boolean back = keys[1] == 1;
-            boolean left = keys[2] == 1;
-            boolean right = keys[3] == 1;
-            boolean jump = keys[4] == 1;
-            boolean sneak = false;
-            boolean sprint = keys[5] == 1;
+        boolean forward = keys[0] == 1;
+        boolean back = keys[1] == 1;
+        boolean left = keys[2] == 1;
+        boolean right = keys[3] == 1;
+        boolean jump = keys[4] == 1;
+        boolean sneak = false;
+        boolean sprint = keys[5] == 1;
 
-            player.input.playerInput = new PlayerInput(forward, back, left, right, jump, sneak, sprint);
-            player.setSprinting(sprint);
-        }
+        player.input.playerInput = new PlayerInput(forward, back, left, right, jump, sneak, sprint);
+        player.setSprinting(sprint);
 
         if (keys[6] == 1 && player.getAttackCooldownProgress(0.0f) >= 0.9f) {
             client.interactionManager.attackEntity(player, lockedTarget);
@@ -182,7 +185,7 @@ public abstract class ClientPlayerRLMixin {
     }
 
     @Unique
-    private float calculateTacticalReward(ClientPlayerEntity player, LivingEntity target, int[] discreteActions) {
+    private float calculateTacticalReward(ClientPlayerEntity player, PlayerEntity target, int[] discreteActions) {
         Vec3d lookDir = player.getRotationVector();
         Vec3d toTarget = new Vec3d(
             target.getX() - player.getX(), 
