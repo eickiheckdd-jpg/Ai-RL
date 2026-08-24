@@ -87,14 +87,20 @@ public class PPOAgent {
         float[] c1 = leakyRelu(matmulAdd(wCritic1, state, bCritic1));
         valueOut[0] = matmulAdd(wCritic2, c1, bCritic2)[0];
 
-        float muPitch = (float) Math.tanh(logits[0]);
-        float muYaw = (float) Math.tanh(logits[1]);
+        float muPitch = logits[0];
+        float muYaw = logits[1];
 
         float stdPitch = (float) Math.exp(logStd[0]);
         float stdYaw = (float) Math.exp(logStd[1]);
 
-        continuousOut[0] = (float) (muPitch + rng.nextGaussian() * stdPitch);
-        continuousOut[1] = (float) (muYaw + rng.nextGaussian() * stdYaw);
+        float rawPitch = (float) (muPitch + rng.nextGaussian() * stdPitch);
+        float rawYaw = (float) (muYaw + rng.nextGaussian() * stdYaw);
+
+        continuousOut[0] = rawPitch;
+        continuousOut[1] = rawYaw;
+
+        float squashedPitch = (float) Math.tanh(rawPitch);
+        float squashedYaw = (float) Math.tanh(rawYaw);
 
         float logProbDiscreteAcc = 0.0f;
         for (int k = 0; k < 7; k++) {
@@ -103,8 +109,13 @@ public class PPOAgent {
             logProbDiscreteAcc += logProbsDisc[discreteOut[k]];
         }
 
-        float logProbPitch = -0.5f * (float) Math.pow((continuousOut[0] - muPitch) / stdPitch, 2) - logStd[0] - 0.5f * (float) Math.log(2 * Math.PI);
-        float logProbYaw   = -0.5f * (float) Math.pow((continuousOut[1] - muYaw) / stdYaw, 2) - logStd[1] - 0.5f * (float) Math.log(2 * Math.PI);
+        float logProbPitch = -0.5f * (float) Math.pow((rawPitch - muPitch) / stdPitch, 2) 
+                             - logStd[0] - 0.5f * (float) Math.log(2 * Math.PI)
+                             - (float) Math.log(1.0f - squashedPitch * squashedPitch + 1e-6f);
+
+        float logProbYaw   = -0.5f * (float) Math.pow((rawYaw - muYaw) / stdYaw, 2) 
+                             - logStd[1] - 0.5f * (float) Math.log(2 * Math.PI)
+                             - (float) Math.log(1.0f - squashedYaw * squashedYaw + 1e-6f);
 
         logProbOut[0] = logProbPitch + logProbYaw + logProbDiscreteAcc;
     }
@@ -164,11 +175,22 @@ public class PPOAgent {
                 float[] c1 = leakyRelu(c1Raw);
                 float valuePred = matmulAdd(wCritic2, c1, bCritic2)[0];
 
-                float muPitch = (float) Math.tanh(logits[0]);
-                float muYaw = (float) Math.tanh(logits[1]);
+                float muPitch = logits[0];
+                float muYaw = logits[1];
 
-                float curLogProbPitch = -0.5f * (float) Math.pow((data.pitchDelta - muPitch) / stdPitch, 2) - logStd[0] - 0.5f * (float) Math.log(2 * Math.PI);
-                float curLogProbYaw   = -0.5f * (float) Math.pow((data.yawDelta - muYaw) / stdYaw, 2) - logStd[1] - 0.5f * (float) Math.log(2 * Math.PI);
+                float rawPitch = data.pitchDelta;
+                float rawYaw = data.yawDelta;
+
+                float squashedPitch = (float) Math.tanh(rawPitch);
+                float squashedYaw = (float) Math.tanh(rawYaw);
+
+                float curLogProbPitch = -0.5f * (float) Math.pow((rawPitch - muPitch) / stdPitch, 2) 
+                                     - logStd[0] - 0.5f * (float) Math.log(2 * Math.PI)
+                                     - (float) Math.log(1.0f - squashedPitch * squashedPitch + 1e-6f);
+
+                float curLogProbYaw   = -0.5f * (float) Math.pow((rawYaw - muYaw) / stdYaw, 2) 
+                                     - logStd[1] - 0.5f * (float) Math.log(2 * Math.PI)
+                                     - (float) Math.log(1.0f - squashedYaw * squashedYaw + 1e-6f);
 
                 float curLogProbDisc = 0.0f;
                 float[][] logProbsDisc = new float[7][2];
@@ -185,11 +207,11 @@ public class PPOAgent {
 
                 float[] dL_dLogits = new float[actionDim];
 
-                float diffP = (data.pitchDelta - muPitch) / stdPitch;
-                float diffY = (data.yawDelta - muYaw) / stdYaw;
+                float diffP = (rawPitch - muPitch) / stdPitch;
+                float diffY = (rawYaw - muYaw) / stdYaw;
 
-                dL_dLogits[0] = dL_dLogProb * (diffP / stdPitch) * (1.0f - muPitch * muPitch);
-                dL_dLogits[1] = dL_dLogProb * (diffY / stdYaw) * (1.0f - muYaw * muYaw);
+                dL_dLogits[0] = dL_dLogProb * (diffP / stdPitch);
+                dL_dLogits[1] = dL_dLogProb * (diffY / stdYaw);
 
                 g_logStd[0] += dL_dLogProb * (diffP * diffP - 1.0f) - entropyCoeff;
                 g_logStd[1] += dL_dLogProb * (diffY * diffY - 1.0f) - entropyCoeff;
