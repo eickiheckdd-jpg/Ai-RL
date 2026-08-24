@@ -5,6 +5,7 @@ import com.example.newgen6.rl.PPOAgent.StepData;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.LivingEntity;
+import net.minecraft.util.PlayerInput;
 import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import org.spongepowered.asm.mixin.Mixin;
@@ -162,10 +163,16 @@ public abstract class ClientPlayerRLMixin {
         player.setYaw(player.getYaw() + yawDelta);
 
         if (NewGen6RLMod.allowMovement) {
-            player.input.movementForward = (keys[0] == 1 ? 1.0f : 0.0f) - (keys[1] == 1 ? 1.0f : 0.0f);
-            player.input.movementSideways = (keys[2] == 1 ? 1.0f : 0.0f) - (keys[3] == 1 ? 1.0f : 0.0f);
-            player.input.jumping = (keys[4] == 1);
-            player.setSprinting(keys[5] == 1);
+            boolean forward = keys[0] == 1;
+            boolean back = keys[1] == 1;
+            boolean left = keys[2] == 1;
+            boolean right = keys[3] == 1;
+            boolean jump = keys[4] == 1;
+            boolean sneak = false;
+            boolean sprint = keys[5] == 1;
+
+            player.input.playerInput = new PlayerInput(forward, back, left, right, jump, sneak, sprint);
+            player.setSprinting(sprint);
         }
 
         if (keys[6] == 1 && player.getAttackCooldownProgress(0.0f) >= 0.9f) {
