@@ -5,7 +5,7 @@ import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 
 public class PPOEngine {
-    private final int stateDim = 11, actionDim = 5;
+    private final int stateDim = 13, actionDim = 5; // Upgraded to 13 states
     private final float[] weightsActor = new float[stateDim * actionDim];
     private final float[] weightsCritic = new float[stateDim];
     private final Random rand = new Random();
@@ -25,15 +25,17 @@ public class PPOEngine {
         for (int i = 0; i < actionDim; i++) {
             float sum = 0.0f;
             for (int j = 0; j < stateDim; j++) sum += state[j] * weightsActor[i * stateDim + j];
-            float mean = (float) Math.tanh(sum); // Continuous neural output [-1, 1]
-            float noise = (float) (rand.nextGaussian() * stdev);
-            outActions[i] = Math.max(-1.0f, Math.min(1.0f, mean + noise));
+            float mean = (float) Math.tanh(sum); 
+            
+            // Dynamic exploration noise scales down when crosshair is locked
+            float adaptiveNoise = stdev * (1.1f - Math.abs(state[3])); 
+            outActions[i] = Math.max(-1.0f, Math.min(1.0f, mean + (float) (rand.nextGaussian() * adaptiveNoise)));
         }
     }
 
     // Thread-safe Async PPO Update Loop
     public void trainAsync(float[] stateIn, float[] actionsIn, float reward, float[] nextStateIn) {
-        // Safe cloning prevents main thread mutation during async computation
+        // Safe cloning prevents main-thread mutation during async computation
         final float[] state = stateIn.clone();
         final float[] actions = actionsIn.clone();
         final float[] nextState = nextStateIn.clone();
