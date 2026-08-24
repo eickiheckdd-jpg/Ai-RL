@@ -6,6 +6,7 @@ import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.option.KeyBinding;
+import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.client.util.InputUtil;
 import net.minecraft.text.Text;
 import org.lwjgl.glfw.GLFW;
@@ -29,7 +30,7 @@ public class NewGen6RLMod implements ClientModInitializer {
             "key.newgen6.toggle_ai",
             InputUtil.Type.KEYSYM,
             GLFW.GLFW_KEY_C,
-            KeyBinding.MISC_CATEGORY
+            "key.categories.misc" // Fixed: Standard Fabric string category
         ));
 
         // Toggle HUD Key: X
@@ -37,7 +38,7 @@ public class NewGen6RLMod implements ClientModInitializer {
             "key.newgen6.toggle_hud",
             InputUtil.Type.KEYSYM,
             GLFW.GLFW_KEY_X,
-            KeyBinding.MISC_CATEGORY
+            "key.categories.misc" // Fixed: Standard Fabric string category
         ));
 
         // Register In-Game HUD Overlay
@@ -62,7 +63,8 @@ public class NewGen6RLMod implements ClientModInitializer {
         }
     }
 
-    private void renderHud(DrawContext context, float tickDelta) {
+    // Fixed signature: Accepts RenderTickCounter instead of float tickDelta for MC 1.21+
+    private void renderHud(DrawContext context, RenderTickCounter tickCounter) {
         if (!hudActive) return;
 
         MinecraftClient client = MinecraftClient.getInstance();
@@ -74,19 +76,16 @@ public class NewGen6RLMod implements ClientModInitializer {
         int boxWidth = 190;
         int boxHeight = 85;
 
-        // Semi-transparent dark background (Minecraft vanilla UI style)
-        int backgroundColor = 0x80000000; // 50% opacity black
-        int borderColor = 0xFF555555;     // Subtle grey border
+        // Translucent dark box (50% opacity black + border)
+        int backgroundColor = 0x80000000; 
+        int borderColor = 0xFF555555;     
 
-        // Draw Outer Border & Inner Panel
         context.fill(x - 1, y - 1, x + boxWidth + 1, y + boxHeight + 1, borderColor);
         context.fill(x, y, x + boxWidth, y + boxHeight, backgroundColor);
 
-        // Text Colors
-        int colorTitle = 0xFF55FF55; // Light Green
-        int colorText = 0xFFFFFFFF;  // White
+        int colorTitle = 0xFF55FF55; 
+        int colorText = 0xFFFFFFFF;  
 
-        // Draw Metrics connected to live variables
         context.drawText(client.textRenderer, "=== NewGen6 PPO Telemetry ===", x + padding, y + 6, colorTitle, true);
         context.drawText(client.textRenderer, "AI State: " + (aiActive ? "§aACTIVE" : "§cOFF"), x + padding, y + 18, colorText, true);
         context.drawText(client.textRenderer, String.format("Reward: %.2f", lastReward), x + padding, y + 28, colorText, true);
