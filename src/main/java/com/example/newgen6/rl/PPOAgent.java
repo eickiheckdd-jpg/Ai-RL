@@ -7,11 +7,11 @@ import java.util.List;
 import java.util.Random;
 
 public class PPOAgent {
-    private final int stateDim, hiddenDim, actionDim = 11;
+    // 16 Actor Outputs: 2 continuous (Pitch/Yaw) + 7 binary discrete heads (14 logits)
+    private final int stateDim, hiddenDim, actionDim = 16;
     private final float lr = 0.00025f, gamma = 0.99f, gaeLambda = 0.95f, clipEps = 0.2f;
-    private final float entropyCoeff = 0.01f; // Prevents policy collapse
-    
-    // Exploration Decay
+    private final float entropyCoeff = 0.01f; 
+
     private float actionStd = 0.6f; 
     private final float minActionStd = 0.05f;
     private final float decayRate = 0.999f;
@@ -34,10 +34,10 @@ public class PPOAgent {
     public static class StepData {
         public float[] state; 
         public float pitchDelta, yawDelta; 
-        public int[] discreteActions; 
+        public int[] discreteActions; // 7 binary choices: [W, S, A, D, Jump, Sprint, Attack]
         public float logProb, reward, value; 
         public boolean done;
-        
+
         public StepData(float[] s, float pd, float yd, int[] da, float lp, float r, float v, boolean d) {
             this.state = s; this.pitchDelta = pd; this.yawDelta = yd; this.discreteActions = da;
             this.logProb = lp; this.reward = r; this.value = v; this.done = d;
@@ -49,41 +49,38 @@ public class PPOAgent {
         float[] logits = matmulAdd(wActor, hidden, bActor);
         valueOut[0] = matmulAdd(wCritic, hidden, bCritic)[0];
 
-        // Tanh bounded continuous aim output
+        // Tanh bounded continuous pitch/yaw deltas
         float muPitch = (float) Math.tanh(logits[0]) * 25f;
         float muYaw = (float) Math.tanh(logits[1]) * 35f;
-        
+
         continuousOut[0] = (float) (muPitch + rng.nextGaussian() * actionStd);
         continuousOut[1] = (float) (muYaw + rng.nextGaussian() * actionStd);
 
-        float[] pMove = softmax(slice(logits, 2, 7));
-        float[] pJump = softmax(slice(logits, 7, 9));
-        float[] pAttack = softmax(slice(logits, 9, 11));
+        float logProbDiscreteAcc = 0.0f;
+        
+        // 7 Binary discrete heads: logits [2..15]
+        for (int k = 0; k < 7; k++) {
+            float[] probs = softmax(slice(logits, 2 + k * 2, 4 + k * 2));
+            discreteOut[k] = sample(probs);
+            logProbDiscreteAcc += (float) Math.log(probs[discreteOut[k]] + 1e-8f);
+        }
 
-        discreteOut[0] = sample(pMove);
-        discreteOut[1] = sample(pJump);
-        discreteOut[2] = sample(pAttack);
-
-        float logProbContinuous = -0.5f * (float)(
+        float logProbContinuous = -0.5f * (float) (
             Math.pow((continuousOut[0] - muPitch) / actionStd, 2) + 
             Math.pow((continuousOut[1] - muYaw) / actionStd, 2)
-        );
-        
-        logProbOut[0] = logProbContinuous + (float) (
-            Math.log(pMove[discreteOut[0]] + 1e-8) + 
-            Math.log(pJump[discreteOut[1]] + 1e-8) + 
-            Math.log(pAttack[discreteOut[2]] + 1e-8)
-        );
+        ) - (float) Math.log(actionStd * Math.sqrt(2 * Math.PI));
+
+        logProbOut[0] = logProbContinuous + logProbDiscreteAcc;
     }
 
     public void train(List<StepData> memory) {
         int N = memory.size();
         if (N == 0) return;
-        
+
         float[] advantages = new float[N];
         float[] returns = new float[N];
         float gae = 0.0f;
-        
+
         // Generalized Advantage Estimation (GAE)
         for (int i = N - 1; i >= 0; i--) {
             StepData cur = memory.get(i);
@@ -98,84 +95,114 @@ public class PPOAgent {
         for (int epoch = 0; epoch < 4; epoch++) {
             for (int i = 0; i < N; i++) {
                 StepData data = memory.get(i);
-                
-                float[] hidden = relu(matmulAdd(w1, data.state, b1));
+
+                float[] hiddenRaw = matmulAdd(w1, data.state, b1);
+                float[] hidden = relu(hiddenRaw);
                 float[] logits = matmulAdd(wActor, hidden, bActor);
                 float valuePred = matmulAdd(wCritic, hidden, bCritic)[0];
-                
+
                 float muPitch = (float) Math.tanh(logits[0]) * 25f;
                 float muYaw = (float) Math.tanh(logits[1]) * 35f;
-                
-                float[] pMove = softmax(slice(logits, 2, 7));
-                float[] pJump = softmax(slice(logits, 7, 9));
-                float[] pAttack = softmax(slice(logits, 9, 11));
 
-                // Entropy Calculation (encourages exploration)
-                float entropy = calculateEntropy(pMove) + calculateEntropy(pJump) + calculateEntropy(pAttack);
-
-                float curLogProb = -0.5f * (float)(
+                float curLogProbCont = -0.5f * (float) (
                     Math.pow((data.pitchDelta - muPitch) / actionStd, 2) + 
                     Math.pow((data.yawDelta - muYaw) / actionStd, 2)
-                ) + (float) (
-                    Math.log(pMove[data.discreteActions[0]] + 1e-8) + 
-                    Math.log(pJump[data.discreteActions[1]] + 1e-8) + 
-                    Math.log(pAttack[data.discreteActions[2]] + 1e-8)
-                );
+                ) - (float) Math.log(actionStd * Math.sqrt(2 * Math.PI));
 
+                float curLogProbDisc = 0.0f;
+                float[][] probsDisc = new float[7][2];
+                for (int k = 0; k < 7; k++) {
+                    probsDisc[k] = softmax(slice(logits, 2 + k * 2, 4 + k * 2));
+                    curLogProbDisc += (float) Math.log(probsDisc[k][data.discreteActions[k]] + 1e-8f);
+                }
+
+                float curLogProb = curLogProbCont + curLogProbDisc;
                 float ratio = (float) Math.exp(curLogProb - data.logProb);
                 float adv = advantages[i];
-                
-                // Clipped Policy Objective Gradient
-                float policyGradMul = (ratio > 1 + clipEps && adv > 0) || (ratio < 1 - clipEps && adv < 0) ? 0.0f : -adv * ratio;
-                policyGradMul -= entropyCoeff * entropy; // Inject entropy gradient
-                
-                float valueGrad = (valuePred - returns[i]);
 
-                // Update Actor Weights
-                for (int a = 0; a < actionDim; a++) {
-                    float gradA = policyGradMul * 0.01f;
-                    bActor.data[a][0] -= lr * gradA;
-                    for (int h = 0; h < hiddenDim; h++) {
-                        wActor.data[a][h] -= lr * gradA * hidden[h];
+                // PPO Clipped Objective Gradient
+                float dL_dLogProb;
+                if ((ratio > 1f + clipEps && adv > 0) || (ratio < 1f - clipEps && adv < 0)) {
+                    dL_dLogProb = 0.0f;
+                } else {
+                    dL_dLogProb = -adv * ratio;
+                }
+
+                // Logit Gradients (Actor)
+                float[] dL_dLogits = new float[actionDim];
+
+                // Continuous Pitch/Yaw Gradients through tanh
+                float dLogProb_dMuP = (data.pitchDelta - muPitch) / (actionStd * actionStd);
+                float dMuP_dZ0 = 25f * (1.0f - (float) Math.pow(Math.tanh(logits[0]), 2));
+                dL_dLogits[0] = dL_dLogProb * dLogProb_dMuP * dMuP_dZ0;
+
+                float dLogProb_dMuY = (data.yawDelta - muYaw) / (actionStd * actionStd);
+                float dMuY_dZ1 = 35f * (1.0f - (float) Math.pow(Math.tanh(logits[1]), 2));
+                dL_dLogits[1] = dL_dLogProb * dLogProb_dMuY * dMuY_dZ1;
+
+                // Discrete Logit Gradients (Categorical Softmax + Entropy)
+                for (int k = 0; k < 7; k++) {
+                    int startIdx = 2 + k * 2;
+                    int chosen = data.discreteActions[k];
+
+                    for (int act = 0; act < 2; act++) {
+                        float dLogProb_dLogit = (act == chosen ? 1.0f : 0.0f) - probsDisc[k][act];
+                        float dEnt_dLogit = -probsDisc[k][act] * ((float) Math.log(probsDisc[k][act] + 1e-8f) + 1.0f);
+                        dL_dLogits[startIdx + act] = dL_dLogProb * dLogProb_dLogit - entropyCoeff * dEnt_dLogit;
                     }
                 }
 
-                // Update Critic Weights
-                bCritic.data[0][0] -= lr * valueGrad * 0.01f;
+                // Value Loss Gradient (Critic)
+                float dL_dValue = valuePred - returns[i];
+
+                // Backpropagate to Hidden Layer
+                float[] dL_dHidden = new float[hiddenDim];
                 for (int h = 0; h < hiddenDim; h++) {
-                    wCritic.data[0][h] -= lr * valueGrad * hidden[h];
+                    float sum = 0.0f;
+                    for (int a = 0; a < actionDim; a++) {
+                        sum += wActor.data[a][h] * dL_dLogits[a];
+                    }
+                    sum += wCritic.data[0][h] * dL_dValue;
+                    
+                    // ReLU Derivative
+                    dL_dHidden[h] = (hiddenRaw[h] > 0) ? sum : 0.0f;
                 }
 
-                // Update Hidden Layer (w1)
+                // Update Actor Weights & Biases
+                for (int a = 0; a < actionDim; a++) {
+                    bActor.data[a][0] -= lr * dL_dLogits[a];
+                    for (int h = 0; h < hiddenDim; h++) {
+                        wActor.data[a][h] -= lr * dL_dLogits[a] * hidden[h];
+                    }
+                }
+
+                // Update Critic Weights & Biases
+                bCritic.data[0][0] -= lr * dL_dValue;
                 for (int h = 0; h < hiddenDim; h++) {
-                    if (hidden[h] > 0) { 
-                        for (int s = 0; s < stateDim; s++) {
-                            w1.data[h][s] -= lr * policyGradMul * data.state[s] * 0.001f;
-                        }
+                    wCritic.data[0][h] -= lr * dL_dValue * hidden[h];
+                }
+
+                // Update Input Layer Weights (w1) & Biases (b1)
+                for (int h = 0; h < hiddenDim; h++) {
+                    b1.data[h][0] -= lr * dL_dHidden[h];
+                    for (int s = 0; s < stateDim; s++) {
+                        w1.data[h][s] -= lr * dL_dHidden[h] * data.state[s];
                     }
                 }
             }
         }
 
-        // Decay Exploration Noise over time
+        // Decay exploration noise
         if (actionStd > minActionStd) {
             actionStd = Math.max(minActionStd, actionStd * decayRate);
         }
-    }
-
-    private float calculateEntropy(float[] probs) {
-        float ent = 0.0f;
-        for (float p : probs) {
-            if (p > 1e-8f) ent -= p * (float) Math.log(p);
-        }
-        return ent;
     }
 
     public void saveBrain(Path path) {
         try {
             Files.createDirectories(path.getParent());
             try (DataOutputStream dos = new DataOutputStream(new FileOutputStream(path.toFile()))) {
-                dos.writeFloat(actionStd); // Save current noise level
+                dos.writeFloat(actionStd);
                 writeMatrix(dos, w1); writeMatrix(dos, b1);
                 writeMatrix(dos, wActor); writeMatrix(dos, bActor);
                 writeMatrix(dos, wCritic); writeMatrix(dos, bCritic);
@@ -186,11 +213,11 @@ public class PPOAgent {
     public void loadBrain(Path path) {
         if (!Files.exists(path)) return;
         try (DataInputStream dis = new DataInputStream(new FileInputStream(path.toFile()))) {
-            actionStd = dis.readFloat(); // Load saved noise level
+            actionStd = dis.readFloat();
             readMatrix(dis, w1); readMatrix(dis, b1);
             readMatrix(dis, wActor); readMatrix(dis, bActor);
             readMatrix(dis, wCritic); readMatrix(dis, bCritic);
-            System.out.println("Loaded AI Brain! Current Exploration Noise (STD): " + actionStd);
+            System.out.println("Loaded AI Brain! Exploration Noise (STD): " + actionStd);
         } catch (IOException e) { e.printStackTrace(); }
     }
 
