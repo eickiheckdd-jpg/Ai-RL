@@ -18,8 +18,8 @@ import java.util.stream.StreamSupport;
 @Mixin(ClientPlayerEntity.class)
 public abstract class PvPMixin {
     @Unique private static final PPOEngine AGENT = new PPOEngine();
-    @Unique private final float[] state = new float[8];
-    @Unique private final float[] nextState = new float[8];
+    @Unique private final float[] state = new float[11];
+    @Unique private final float[] nextState = new float[11];
     @Unique private final float[] actions = new float[5];
     @Unique private int saveTimer = 0;
 
@@ -27,46 +27,52 @@ public abstract class PvPMixin {
     private void onTick(CallbackInfo ci) {
         ClientPlayerEntity p = (ClientPlayerEntity) (Object) this;
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client.world == null || p.isDead()) return;
 
+        // Null Guard Check
+        if (client.world == null || p.isDead() || p.isRemoved()) return;
+
+        // Select Closest Valid Enemy Target
         PlayerEntity t = StreamSupport.stream(client.world.getEntities().spliterator(), false)
-            .filter(e -> e instanceof PlayerEntity && e != p && e.isAlive() && p.distanceTo(e) <= 16.0f)
-            .map(e -> (PlayerEntity) e).min(Comparator.comparingDouble(p::distanceTo)).orElse(null);
+            .filter(e -> e instanceof PlayerEntity && e != p && e.isAlive() && !e.isRemoved() && p.distanceTo(e) <= 16.0f)
+            .map(e -> (PlayerEntity) e)
+            .min(Comparator.comparingDouble(p::distanceTo))
+            .orElse(null);
 
         if (t == null) return;
 
+        // 1. Extract Current State
         extractState(p, t, state);
+
+        // 2. Continuous Policy Inference
         AGENT.selectAction(state, actions);
 
-        // Native Inputs
-        p.setYaw(p.getYaw() + (actions[0] * 15.0f));
-        p.setPitch(Math.max(-90.0f, Math.min(90.0f, p.getPitch() + (actions[1] * 15.0f))));
+        // 3. Raw Continuous Native Control (No hardcoded snaps or aim assist)
+        p.setYaw(p.getYaw() + (actions[0] * 18.0f)); // Pure continuous yaw velocity
+        float targetPitch = p.getPitch() + (actions[1] * 18.0f);
+        p.setPitch(Math.max(-90.0f, Math.min(90.0f, targetPitch))); // Pitch Clamp Guard
 
+        // Native Input Injection
         p.input.playerInput = new PlayerInput(
-            actions[2] > 0.0f,  
-            actions[2] < -0.3f, 
-            false, false,       
-            actions[4] > 0.5f,  
-            false,              
-            actions[3] > 0.0f   
+            actions[2] > 0.0f,  // W
+            actions[2] < -0.3f, // S
+            false, false,       // Strafe A/D
+            actions[4] > 0.5f,  // Space (Jump)
+            false,              // Sneak
+            actions[3] > 0.0f   // Sprint
         );
         p.setSprinting(actions[3] > 0.0f);
-        client.options.attackKey.setPressed(actions[4] > 0.0f);
+        client.options.attackKey.setPressed(actions[4] > 0.0f); // Native Left-Click Simulation
 
+        // 4. Extract Next State & Train
         extractState(p, t, nextState);
         float reward = calculateReward(p, t, actions[4] > 0.0f);
         AGENT.trainAsync(state, actions, reward, nextState);
 
-        // 1. Periodic Auto-Save Every 5 Minutes (6000 Ticks)
+        // 5. Dual-Buffer Auto Save Engine
         saveTimer++;
-        if (saveTimer >= 6000) {
+        if (saveTimer >= 6000 || t.isDead() || p.getHealth() <= 0) {
             AGENT.saveBrainAsync();
             saveTimer = 0;
-        }
-
-        // 2. Instant Match End Save (Saves immediately on player death or target elimination)
-        if (t.isDead() || p.getHealth() <= 0) {
-            AGENT.saveBrainAsync();
         }
     }
 
@@ -74,14 +80,19 @@ public abstract class PvPMixin {
     private void extractState(ClientPlayerEntity p, PlayerEntity t, float[] out) {
         Vec3d toT = t.getEyePos().subtract(p.getEyePos()).normalize();
         Vec3d look = p.getRotationVector();
+        Vec3d relVel = t.getVelocity().subtract(p.getVelocity());
+
         out[0] = (float) (t.getX() - p.getX()) / 16.0f;
         out[1] = (float) (t.getY() - p.getY()) / 16.0f;
         out[2] = (float) (t.getZ() - p.getZ()) / 16.0f;
-        out[3] = (float) look.dotProduct(toT);            
+        out[3] = (float) look.dotProduct(toT);      // Crosshair vector dot product
         out[4] = p.getHealth() / 20.0f;
         out[5] = t.getHealth() / 20.0f;
-        out[6] = p.getAttackCooldownProgress(0.0f);       
+        out[6] = p.getAttackCooldownProgress(0.0f); // 1.9+ Sword Cooldown
         out[7] = p.distanceTo(t) / 16.0f;
+        out[8] = (float) relVel.x;
+        out[9] = (float) relVel.y;
+        out[10] = (float) relVel.z;
     }
 
     @Unique
@@ -90,12 +101,13 @@ public abstract class PvPMixin {
         float cd = p.getAttackCooldownProgress(0.0f);
         double dist = p.distanceTo(t);
 
+        // Natural Anti-Spam Penalties & Patience Rewards
         if (clicked) {
-            if (cd < 0.9f) r -= 0.5f; 
-            else if (dist <= 3.0f) r += 1.5f; 
+            if (cd < 0.9f) r -= 0.6f;         // Penalty for premature click
+            else if (dist <= 3.0f) r += 1.8f; // Reward for fully charged hit timing
         }
-        if (t.hurtTime == 10) r += 10.0f;  
-        if (p.hurtTime == 10) r -= 5.0f;   
+        if (t.hurtTime == 10) r += 10.0f;     // Target damaged
+        if (p.hurtTime == 10) r -= 5.0f;      // Player took damage
         return r;
     }
 }
