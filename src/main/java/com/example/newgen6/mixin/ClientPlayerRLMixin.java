@@ -26,6 +26,9 @@ public abstract class ClientPlayerRLMixin {
 
     @Inject(method = "tick", at = @At("HEAD"))
     private void onClientTick(CallbackInfo ci) {
+        // --- ADD THIS CHECK ---
+        if (!NewGen6RLMod.aiEnabled) return;
+
         ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
         MinecraftClient client = MinecraftClient.getInstance();
         if (client.world == null || player.isDead()) return;
