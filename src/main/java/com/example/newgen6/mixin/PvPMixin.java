@@ -20,7 +20,7 @@ public abstract class PvPMixin {
     @Unique private static final PPOEngine AGENT = new PPOEngine();
     @Unique private final float[] state = new float[13];
     @Unique private final float[] nextState = new float[13];
-    @Unique private final float[] actions = new float[5];
+    @Unique private final float[] actions = new float[7]; // Expanded to 7 Actions
     @Unique private int saveTimer = 0;
 
     @Inject(method = "tick", at = @At("HEAD"))
@@ -28,7 +28,6 @@ public abstract class PvPMixin {
         ClientPlayerEntity p = (ClientPlayerEntity) (Object) this;
         MinecraftClient client = MinecraftClient.getInstance();
 
-        // Null Guard & Lifecycle Checks
         if (client.world == null || p.isDead() || p.isRemoved()) return;
 
         PlayerEntity t = StreamSupport.stream(client.world.getEntities().spliterator(), false)
@@ -42,28 +41,27 @@ public abstract class PvPMixin {
         extractState(p, t, state);
         AGENT.selectAction(state, actions);
 
-        // Native Continuous Aim Injection
+        // Native Continuous Aiming
         p.setYaw(p.getYaw() + (actions[0] * 18.0f)); 
-        float targetPitch = p.getPitch() + (actions[1] * 18.0f);
-        p.setPitch(Math.max(-90.0f, Math.min(90.0f, targetPitch))); 
+        p.setPitch(Math.max(-90.0f, Math.min(90.0f, p.getPitch() + (actions[1] * 18.0f)))); 
 
-        // Native Movement & Combat Injection
+        // Full Strategic Control Setup
         p.input.playerInput = new PlayerInput(
-            actions[2] > 0.0f,  // W
-            actions[2] < -0.3f, // S
-            false, false,       // Strafe A/D
-            actions[4] > 0.5f,  // Space (Jump)
-            false,              // Sneak
-            actions[3] > 0.0f   // Sprint
+            actions[2] > 0.0f,   // Move Forward (W)
+            actions[2] < -0.3f,  // Move Backwards (S)
+            actions[5] > 0.2f,   // Strafe Left (A)
+            actions[6] > 0.2f,   // Strafe Right (D)
+            actions[4] > 0.5f,   // Jump
+            false,               // Sneak
+            actions[3] > 0.0f    // Sprint
         );
         p.setSprinting(actions[3] > 0.0f);
-        client.options.attackKey.setPressed(actions[4] > 0.0f); 
+        client.options.attackKey.setPressed(actions[4] > 0.5f); 
 
         extractState(p, t, nextState);
-        float reward = calculateReward(p, t, actions[4] > 0.0f);
+        float reward = calculateReward(p, t, actions[4] > 0.5f);
         AGENT.trainAsync(state, actions, reward, nextState);
 
-        // Auto-Save Management
         saveTimer++;
         if (saveTimer >= 6000 || t.isDead() || p.getHealth() <= 0) {
             AGENT.saveBrainAsync();
@@ -85,11 +83,11 @@ public abstract class PvPMixin {
         out[5] = t.getHealth() / 20.0f;
         out[6] = p.getAttackCooldownProgress(0.0f); 
         out[7] = p.distanceTo(t) / 16.0f;
-        out[8] = (float) relVel.x;                  // Velocity X
-        out[9] = (float) relVel.y;                  // Velocity Y
-        out[10] = (float) relVel.z;                 // Velocity Z
-        out[11] = t.hurtTime / 10.0f;               // Target Invulnerability
-        out[12] = p.hurtTime / 10.0f;               // Self Invulnerability
+        out[8] = (float) relVel.x;
+        out[9] = (float) relVel.y;
+        out[10] = (float) relVel.z;
+        out[11] = t.hurtTime / 10.0f;
+        out[12] = p.hurtTime / 10.0f;
     }
 
     @Unique
@@ -98,10 +96,13 @@ public abstract class PvPMixin {
         float cd = p.getAttackCooldownProgress(0.0f);
         double dist = p.distanceTo(t);
 
+        // Optimal Hit Spacing (2.3 - 3.0 Blocks) Reward
+        if (dist >= 2.3 && dist <= 3.0) r += 0.1f;
+
         if (clicked) {
-            if (cd < 0.9f) r -= 0.6f;             // Penalty: Spam clicking
-            else if (t.hurtTime > 0) r -= 0.8f;   // Penalty: Hitting during invulnerability frames
-            else if (dist <= 3.0f) r += 1.8f;     // Reward: Perfect combo timing
+            if (cd < 0.9f) r -= 0.6f;             // Penalty: Early spam click
+            else if (t.hurtTime > 0) r -= 0.8f;   // Penalty: Hitting during invulnerability
+            else if (dist <= 3.0f) r += 2.0f;     // Reward: Perfectly timed hit
         }
         
         if (t.hurtTime == 10) r += 10.0f;         
