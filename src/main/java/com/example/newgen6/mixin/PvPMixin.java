@@ -20,7 +20,7 @@ public abstract class PvPMixin {
     @Unique private static final PPOEngine AGENT = new PPOEngine();
     @Unique private final float[] state = new float[13];
     @Unique private final float[] nextState = new float[13];
-    @Unique private final float[] actions = new float[7]; // Expanded to 7 Actions
+    @Unique private final float[] actions = new float[7];
     @Unique private int saveTimer = 0;
 
     @Inject(method = "tick", at = @At("HEAD"))
@@ -41,25 +41,28 @@ public abstract class PvPMixin {
         extractState(p, t, state);
         AGENT.selectAction(state, actions);
 
-        // Native Continuous Aiming
+        // Continuous Pitch and Yaw Control
         p.setYaw(p.getYaw() + (actions[0] * 18.0f)); 
         p.setPitch(Math.max(-90.0f, Math.min(90.0f, p.getPitch() + (actions[1] * 18.0f)))); 
 
-        // Full Strategic Control Setup
+        // Separated Input Injection
         p.input.playerInput = new PlayerInput(
-            actions[2] > 0.0f,   // Move Forward (W)
-            actions[2] < -0.3f,  // Move Backwards (S)
-            actions[5] > 0.2f,   // Strafe Left (A)
-            actions[6] > 0.2f,   // Strafe Right (D)
-            actions[4] > 0.5f,   // Jump
+            actions[2] > 0.0f,   // W (Forward)
+            actions[2] < -0.3f,  // S (Backward)
+            actions[5] > 0.2f,   // A (Strafe Left)
+            actions[6] > 0.2f,   // D (Strafe Right)
+            actions[3] > 0.5f,   // Space (Jump)
             false,               // Sneak
-            actions[3] > 0.0f    // Sprint
+            actions[2] > 0.5f    // Sprint
         );
-        p.setSprinting(actions[3] > 0.0f);
-        client.options.attackKey.setPressed(actions[4] > 0.5f); 
+        p.setSprinting(actions[2] > 0.5f);
+
+        // Independent Sword Swing Input
+        boolean isAttacking = actions[4] > 0.2f;
+        client.options.attackKey.setPressed(isAttacking); 
 
         extractState(p, t, nextState);
-        float reward = calculateReward(p, t, actions[4] > 0.5f);
+        float reward = calculateReward(p, t, isAttacking);
         AGENT.trainAsync(state, actions, reward, nextState);
 
         saveTimer++;
@@ -96,13 +99,13 @@ public abstract class PvPMixin {
         float cd = p.getAttackCooldownProgress(0.0f);
         double dist = p.distanceTo(t);
 
-        // Optimal Hit Spacing (2.3 - 3.0 Blocks) Reward
+        // Ideal Hit-Range Reward
         if (dist >= 2.3 && dist <= 3.0) r += 0.1f;
 
         if (clicked) {
             if (cd < 0.9f) r -= 0.6f;             // Penalty: Early spam click
             else if (t.hurtTime > 0) r -= 0.8f;   // Penalty: Hitting during invulnerability
-            else if (dist <= 3.0f) r += 2.0f;     // Reward: Perfectly timed hit
+            else if (dist <= 3.0f) r += 2.0f;     // Reward: Timed strike
         }
         
         if (t.hurtTime == 10) r += 10.0f;         
