@@ -12,38 +12,32 @@ public class Matrix {
         this.data = new float[rows][cols];
     }
 
-    public static Matrix randomXavier(int rows, int cols, Random rng) {
+    public static Matrix randomOrthogonal(int rows, int cols, float gain, Random rng) {
         Matrix m = new Matrix(rows, cols);
-        float limit = (float) Math.sqrt(6.0 / (rows + cols));
+        float limit = (float) (gain * Math.sqrt(6.0 / (rows + cols)));
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++) {
-                m.data[i][j] = (rng.nextFloat() * 2 * limit) - limit;
+                m.data[i][j] = (rng.nextFloat() * 2.0f * limit) - limit;
             }
         }
         return m;
     }
 
-    // Performs per-parameter adaptive updates using Adam momentum tracking
-    public void adamUpdate(Matrix grad, Matrix m, Matrix v, int t, float lr, float beta1, float beta2, float eps) {
-        float b1Correction = 1.0f - (float) Math.pow(beta1, t);
-        float b2Correction = 1.0f - (float) Math.pow(beta2, t);
+    public void adamUpdate(Matrix grad, Matrix m, Matrix v, int step, float lr, float beta1, float beta2, float eps) {
+        float b1Correction = 1.0f - (float) Math.pow(beta1, step);
+        float b2Correction = 1.0f - (float) Math.pow(beta2, step);
 
         for (int i = 0; i < rows; i++) {
             for (int j = 0; j < cols; j++) {
                 float g = grad.data[i][j];
-                
-                // First moment vector update
+
                 m.data[i][j] = beta1 * m.data[i][j] + (1.0f - beta1) * g;
-                
-                // Second moment vector update
                 v.data[i][j] = beta2 * v.data[i][j] + (1.0f - beta2) * (g * g);
 
-                // Bias corrections
                 float mHat = m.data[i][j] / b1Correction;
                 float vHat = v.data[i][j] / b2Correction;
 
-                // Gradient update
-                this.data[i][j] -= lr * mHat / ((float) Math.sqrt(vHat) + eps);
+                this.data[i][j] -= lr * mHat / ((float) Math.sqrt(vHat) + 1e-5f);
             }
         }
     }
