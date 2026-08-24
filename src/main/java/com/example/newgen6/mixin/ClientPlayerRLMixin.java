@@ -105,9 +105,9 @@ public abstract class ClientPlayerRLMixin {
             p.isSprinting() ? 1f : 0f,
             p.isSubmergedInWater() ? 1f : 0f,
             p.horizontalCollision ? 1f : 0f,
-            (float) (p.fallDistance / 5.0), // Fixed: explicit float cast
+            (float) (p.fallDistance / 5.0),
             p.handSwinging ? 1f : 0f,
-            (float) (t.fallDistance / 5.0), // Fixed: explicit float cast
+            (float) (t.fallDistance / 5.0),
             (float) Math.sqrt(tV.x * tV.x + tV.z * tV.z),
             t.isSprinting() ? 1f : 0f,
             (float) playerLookDot,
@@ -117,9 +117,14 @@ public abstract class ClientPlayerRLMixin {
 
     @Unique
     private void applyInputs(ClientPlayerEntity player, MinecraftClient client, float[] mouseDeltas, int[] keys) {
-        // Aiming is always allowed
-        player.setPitch(MathHelper.clamp(player.getPitch() + mouseDeltas[0], -90f, 90f));
-        player.setYaw(player.getYaw() + mouseDeltas[1]);
+        // Bound network outputs to [-1, 1] with tanh and scale to a maximum of 3.0 degrees per tick
+        float maxDegreesPerTick = 3.0f;
+        float pitchDelta = (float) Math.tanh(mouseDeltas[0]) * maxDegreesPerTick;
+        float yawDelta   = (float) Math.tanh(mouseDeltas[1]) * maxDegreesPerTick;
+
+        // Apply clamped camera rotations
+        player.setPitch(MathHelper.clamp(player.getPitch() + pitchDelta, -90f, 90f));
+        player.setYaw(player.getYaw() + yawDelta);
 
         // Curriculum Masking
         if (NewGen6RLMod.allowMovement) {
