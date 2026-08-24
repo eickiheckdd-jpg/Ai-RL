@@ -1,12 +1,15 @@
 package com.example.newgen6.rl;
 
+import java.io.*;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.List;
 import java.util.Random;
 
 public class PPOAgent {
-    private final int stateDim, hiddenDim;
+    private final int stateDim, hiddenDim, actionDim = 11;
     private final float lr = 0.0003f, gamma = 0.99f, clipEps = 0.2f;
-    private final float ACTION_STD = 0.5f; // Fixed standard deviation for continuous exploration
+    private final float ACTION_STD = 0.5f;
     
     public Matrix w1, b1, wActor, bActor, wCritic, bCritic;
     private final Random rng = new Random();
@@ -14,14 +17,11 @@ public class PPOAgent {
     public PPOAgent(int stateDim, int hiddenDim) {
         this.stateDim = stateDim;
         this.hiddenDim = hiddenDim;
-        
-        // Output dim: 2 (Continuous Pitch/Yaw) + 5 (Move) + 2 (Jump) + 2 (Attack) = 11
-        int outDim = 11; 
 
         this.w1 = Matrix.randomXavier(hiddenDim, stateDim, rng);
         this.b1 = new Matrix(hiddenDim, 1);
-        this.wActor = Matrix.randomXavier(outDim, hiddenDim, rng);
-        this.bActor = new Matrix(outDim, 1);
+        this.wActor = Matrix.randomXavier(actionDim, hiddenDim, rng);
+        this.bActor = new Matrix(actionDim, 1);
         this.wCritic = Matrix.randomXavier(1, hiddenDim, rng);
         this.bCritic = new Matrix(1, 1);
     }
@@ -44,14 +44,12 @@ public class PPOAgent {
         float[] logits = matmulAdd(wActor, hidden, bActor);
         valueOut[0] = matmulAdd(wCritic, hidden, bCritic)[0];
 
-        // Continuous Heads (Index 0, 1 are Mu for Pitch and Yaw)
-        float muPitch = (float) Math.tanh(logits[0]) * 30f; // Constrain delta to -30 to +30 degrees
+        float muPitch = (float) Math.tanh(logits[0]) * 30f;
         float muYaw = (float) Math.tanh(logits[1]) * 40f;
         
         continuousOut[0] = (float) (muPitch + rng.nextGaussian() * ACTION_STD);
         continuousOut[1] = (float) (muYaw + rng.nextGaussian() * ACTION_STD);
 
-        // Discrete Heads
         float[] pMove = softmax(slice(logits, 2, 7));
         float[] pJump = softmax(slice(logits, 7, 9));
         float[] pAttack = softmax(slice(logits, 9, 11));
@@ -60,7 +58,6 @@ public class PPOAgent {
         discreteOut[1] = sample(pJump);
         discreteOut[2] = sample(pAttack);
 
-        // Log Probability (Simplified combination of Gaussian PDF and Discrete Logits)
         float logProbContinuous = -0.5f * (float)(
             Math.pow((continuousOut[0] - muPitch) / ACTION_STD, 2) + 
             Math.pow((continuousOut[1] - muYaw) / ACTION_STD, 2)
@@ -75,7 +72,10 @@ public class PPOAgent {
 
     public void train(List<StepData> memory) {
         int N = memory.size();
+        if (N == 0) return;
+        
         float[] advantages = new float[N];
+        float[] returns = new float[N];
         float gae = 0.0f;
         
         for (int i = N - 1; i >= 0; i--) {
@@ -84,13 +84,16 @@ public class PPOAgent {
             float delta = cur.reward + gamma * nextVal - cur.value;
             gae = delta + gamma * 0.95f * gae;
             advantages[i] = gae;
+            returns[i] = gae + cur.value;
         }
 
         for (int epoch = 0; epoch < 4; epoch++) {
             for (int i = 0; i < N; i++) {
                 StepData data = memory.get(i);
+                
                 float[] hidden = relu(matmulAdd(w1, data.state, b1));
                 float[] logits = matmulAdd(wActor, hidden, bActor);
+                float valuePred = matmulAdd(wCritic, hidden, bCritic)[0];
                 
                 float muPitch = (float) Math.tanh(logits[0]) * 30f;
                 float muYaw = (float) Math.tanh(logits[1]) * 40f;
@@ -109,15 +112,72 @@ public class PPOAgent {
                 );
 
                 float ratio = (float) Math.exp(curLogProb - data.logProb);
+                float adv = advantages[i];
                 
-                // Backprop (Simplified)
-                float clipGrad = (ratio > 1 + clipEps && advantages[i] > 0) || (ratio < 1 - clipEps && advantages[i] < 0) ? 0.0f : -advantages[i];
+                float policyGradMul = (ratio > 1 + clipEps && adv > 0) || (ratio < 1 - clipEps && adv < 0) ? 0.0f : -adv * ratio;
+                float valueGrad = (valuePred - returns[i]);
+
+                // Update Actor Weights
+                for (int a = 0; a < actionDim; a++) {
+                    float gradA = policyGradMul * 0.01f;
+                    bActor.data[a][0] -= lr * gradA;
+                    for (int h = 0; h < hiddenDim; h++) {
+                        wActor.data[a][h] -= lr * gradA * hidden[h];
+                    }
+                }
+
+                // Update Critic Weights
+                bCritic.data[0][0] -= lr * valueGrad * 0.01f;
                 for (int h = 0; h < hiddenDim; h++) {
-                    for (int s = 0; s < stateDim; s++) {
-                        w1.data[h][s] -= lr * clipGrad * data.state[s] * 0.01f;
+                    wCritic.data[0][h] -= lr * valueGrad * hidden[h];
+                }
+
+                // Update Shared Hidden Weights
+                for (int h = 0; h < hiddenDim; h++) {
+                    if (hidden[h] > 0) { 
+                        for (int s = 0; s < stateDim; s++) {
+                            w1.data[h][s] -= lr * policyGradMul * data.state[s] * 0.001f;
+                        }
                     }
                 }
             }
+        }
+    }
+
+    public void saveBrain(Path path) {
+        try {
+            Files.createDirectories(path.getParent());
+            try (DataOutputStream dos = new DataOutputStream(new FileOutputStream(path.toFile()))) {
+                writeMatrix(dos, w1); writeMatrix(dos, b1);
+                writeMatrix(dos, wActor); writeMatrix(dos, bActor);
+                writeMatrix(dos, wCritic); writeMatrix(dos, bCritic);
+            }
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    public void loadBrain(Path path) {
+        if (!Files.exists(path)) return;
+        try (DataInputStream dis = new DataInputStream(new FileInputStream(path.toFile()))) {
+            readMatrix(dis, w1); readMatrix(dis, b1);
+            readMatrix(dis, wActor); readMatrix(dis, bActor);
+            readMatrix(dis, wCritic); readMatrix(dis, bCritic);
+            System.out.println("Successfully loaded AI brain from " + path);
+        } catch (IOException e) {
+            e.printStackTrace();
+        }
+    }
+
+    private void writeMatrix(DataOutputStream dos, Matrix m) throws IOException {
+        for (int i = 0; i < m.rows; i++) {
+            for (int j = 0; j < m.cols; j++) dos.writeFloat(m.data[i][j]);
+        }
+    }
+
+    private void readMatrix(DataInputStream dis, Matrix m) throws IOException {
+        for (int i = 0; i < m.rows; i++) {
+            for (int j = 0; j < m.cols; j++) m.data[i][j] = dis.readFloat();
         }
     }
 
