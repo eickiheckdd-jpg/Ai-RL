@@ -14,7 +14,7 @@ import org.lwjgl.glfw.GLFW;
 public class NewGen6RLMod implements ClientModInitializer {
     public static final String MOD_ID = "newgen6";
 
-    public static boolean aiEnabled = true;
+    public static boolean aiEnabled = false;
     public static boolean allowMovement = true;
     public static boolean showHud = true;
 
