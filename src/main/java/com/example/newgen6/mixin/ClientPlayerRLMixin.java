@@ -24,8 +24,6 @@ public abstract class ClientPlayerRLMixin {
 
     @Unique private final List<StepData> rlMemory = new ArrayList<>();
     @Unique private UUID lastTargetUuid = null;
-    @Unique private float prevTargetHealth = 20f;
-    @Unique private float prevSelfHealth = 20f;
 
     @Inject(method = "tick", at = @At("HEAD"))
     private void onClientTick(CallbackInfo ci) {
@@ -49,7 +47,7 @@ public abstract class ClientPlayerRLMixin {
 
         applyInputs(player, client, continuousActions, discreteActions);
 
-        float reward = calculateTacticalReward(player, target);
+        float reward = calculateTacticalReward(player, client, target, discreteActions);
         boolean done = target.isDead() || player.isDead();
 
         rlMemory.add(new StepData(state, continuousActions[0], continuousActions[1], discreteActions, logProb[0], reward, value[0], done));
@@ -156,54 +154,40 @@ public abstract class ClientPlayerRLMixin {
     }
 
     @Unique
-    private float calculateTacticalReward(ClientPlayerEntity player, LivingEntity target) {
-        float reward = 0f;
-
+    private float calculateTacticalReward(ClientPlayerEntity player, MinecraftClient client, LivingEntity target, int[] discreteActions) {
         if (lastTargetUuid == null || !lastTargetUuid.equals(target.getUuid())) {
             lastTargetUuid = target.getUuid();
-            prevTargetHealth = target.getHealth();
-            prevSelfHealth = player.getHealth();
             return 0f;
         }
 
-        float currentDist = player.distanceTo(target);
-
-        if (target.getHealth() < prevTargetHealth) {
-            float damageDealt = prevTargetHealth - target.getHealth();
-            reward += damageDealt * 8.0f;
-
-            if (player.fallDistance > 0 && !player.isOnGround()) {
-                reward += 3.0f;
-            }
-
-            if (player.isSprinting()) {
-                reward += 2.0f;
-            }
-        }
-
-        if (player.getHealth() < prevSelfHealth) {
-            reward -= (prevSelfHealth - player.getHealth()) * 6.0f;
-        }
-
-        if (currentDist >= 2.0f && currentDist <= 3.2f) {
-            reward += 0.2f;
-        } else if (currentDist > 4.5f) {
-            reward -= 0.1f;
-        }
-
+        // 1. Precise Vector Crosshair Alignment (-1.0 to 1.0)
         Vec3d lookDir = player.getRotationVector();
-        Vec3d toTarget = new Vec3d(target.getX() - player.getX(), target.getEyeY() - player.getEyeY(), target.getZ() - player.getZ()).normalize();
-        double dot = lookDir.dotProduct(toTarget);
-        if (dot > 0.95) {
-            reward += 0.1f;
+        Vec3d toTarget = new Vec3d(
+            target.getX() - player.getX(), 
+            target.getEyeY() - player.getEyeY(), 
+            target.getZ() - player.getZ()
+        ).normalize();
+        float alignment = (float) lookDir.dotProduct(toTarget);
+
+        float reward = 0f;
+
+        // 2. Exponential Shaping: heavily rewards getting dead-center, penalizes looking away
+        if (alignment > 0.0f) {
+            reward += (float) Math.pow(alignment, 4.0) * 0.4f;
+        } else {
+            reward -= 0.05f; 
         }
 
-        if (target.hurtTime > 0 && player.getAttackCooldownProgress(0.5f) < 0.8f) {
-            reward -= 0.15f;
+        // 3. Precision Attack Incentive: Gated directly by crosshair alignment
+        boolean isAttacking = (discreteActions[6] == 1);
+        if (isAttacking) {
+            if (alignment > 0.85f) {
+                reward += 1.5f; // Hit target cleanly
+            } else {
+                reward -= 0.5f; // Whiffed / attacked empty space
+            }
         }
 
-        prevTargetHealth = target.getHealth();
-        prevSelfHealth = player.getHealth();
         return reward;
     }
 
