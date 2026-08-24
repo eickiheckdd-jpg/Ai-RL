@@ -7,18 +7,21 @@ import java.util.List;
 import java.util.Random;
 
 public class PPOAgent {
-    private final int stateDim, hiddenDim, actionDim = 16;
+    private final int stateDim, hiddenDim = 128, actionDim = 16;
     private final float lr = 0.0003f, gamma = 0.99f, gaeLambda = 0.95f, clipEps = 0.2f;
     private final float entropyCoeff = 0.01f; 
-
-    private final float beta1 = 0.9f, beta2 = 0.999f, eps = 1e-8f;
-    private int timeStep = 0;
-
-    public Matrix w1, b1, wActor, bActor, wCritic, bCritic;
+    private final float beta1 = 0.9f, beta2 = 0.999f, eps = 1e-5f;
     
-    private Matrix m_w1, v_w1, m_b1, v_b1;
+    private int timeStep = 0;
+    private int adamStep = 0;
+
+    public Matrix wBase1, bBase1, wBase2, bBase2;
+    public Matrix wActor, bActor;
+    public Matrix wCritic1, bCritic1, wCritic2, bCritic2;
+
+    private Matrix m_wB1, v_wB1, m_bB1, v_bB1, m_wB2, v_wB2, m_bB2, v_bB2;
     private Matrix m_wA, v_wA, m_bA, v_bA;
-    private Matrix m_wC, v_wC, m_bC, v_bC;
+    private Matrix m_wC1, v_wC1, m_bC1, v_bC1, m_wC2, v_wC2, m_bC2, v_bC2;
 
     private final float[] logStd = new float[] { -0.5f, -0.5f };
     private final float[] m_logStd = new float[2];
@@ -26,38 +29,42 @@ public class PPOAgent {
 
     private final Random rng = new Random();
 
-    public PPOAgent(int stateDim, int hiddenDim) {
+    public PPOAgent(int stateDim) {
         this.stateDim = stateDim;
-        this.hiddenDim = hiddenDim;
 
-        this.w1 = Matrix.randomXavier(hiddenDim, stateDim, rng);
-        this.b1 = new Matrix(hiddenDim, 1);
-        this.wActor = Matrix.randomXavier(actionDim, hiddenDim, rng);
+        this.wBase1 = Matrix.randomOrthogonal(hiddenDim, stateDim, (float) Math.sqrt(2.0), rng);
+        this.bBase1 = new Matrix(hiddenDim, 1);
+        this.wBase2 = Matrix.randomOrthogonal(hiddenDim, hiddenDim, (float) Math.sqrt(2.0), rng);
+        this.bBase2 = new Matrix(hiddenDim, 1);
+
+        this.wActor = Matrix.randomOrthogonal(actionDim, hiddenDim, 0.01f, rng);
         this.bActor = new Matrix(actionDim, 1);
-        this.wCritic = Matrix.randomXavier(1, hiddenDim, rng);
-        this.bCritic = new Matrix(1, 1);
+
+        this.wCritic1 = Matrix.randomOrthogonal(hiddenDim, stateDim, (float) Math.sqrt(2.0), rng);
+        this.bCritic1 = new Matrix(hiddenDim, 1);
+        this.wCritic2 = Matrix.randomOrthogonal(1, hiddenDim, 1.0f, rng);
+        this.bCritic2 = new Matrix(1, 1);
 
         resetAdamBuffers();
     }
 
     private void resetAdamBuffers() {
-        this.m_w1 = new Matrix(hiddenDim, stateDim); this.v_w1 = new Matrix(hiddenDim, stateDim);
-        this.m_b1 = new Matrix(hiddenDim, 1);        this.v_b1 = new Matrix(hiddenDim, 1);
+        this.m_wB1 = new Matrix(hiddenDim, stateDim); this.v_wB1 = new Matrix(hiddenDim, stateDim);
+        this.m_bB1 = new Matrix(hiddenDim, 1);        this.v_bB1 = new Matrix(hiddenDim, 1);
+        this.m_wB2 = new Matrix(hiddenDim, hiddenDim); this.v_wB2 = new Matrix(hiddenDim, hiddenDim);
+        this.m_bB2 = new Matrix(hiddenDim, 1);        this.v_bB2 = new Matrix(hiddenDim, 1);
+
         this.m_wA = new Matrix(actionDim, hiddenDim); this.v_wA = new Matrix(actionDim, hiddenDim);
         this.m_bA = new Matrix(actionDim, 1);        this.v_bA = new Matrix(actionDim, 1);
-        this.m_wC = new Matrix(1, hiddenDim);        this.v_wC = new Matrix(1, hiddenDim);
-        this.m_bC = new Matrix(1, 1);                this.v_bC = new Matrix(1, 1);
+
+        this.m_wC1 = new Matrix(hiddenDim, stateDim); this.v_wC1 = new Matrix(hiddenDim, stateDim);
+        this.m_bC1 = new Matrix(hiddenDim, 1);        this.v_bC1 = new Matrix(hiddenDim, 1);
+        this.m_wC2 = new Matrix(1, hiddenDim);        this.v_wC2 = new Matrix(1, hiddenDim);
+        this.m_bC2 = new Matrix(1, 1);                this.v_bC2 = new Matrix(1, 1);
     }
 
-    // --- Added Getters for HUD ---
-    public float[] getLogStd() {
-        return logStd;
-    }
-
-    public int getTimeStep() {
-        return timeStep;
-    }
-    // ----------------------------
+    public float[] getLogStd() { return logStd; }
+    public int getTimeStep() { return timeStep; }
 
     public static class StepData {
         public float[] state; 
@@ -72,10 +79,13 @@ public class PPOAgent {
         }
     }
 
-    public void selectAction(float[] state, float[] continuousOut, int[] discreteOut, float[] logProbOut, float[] valueOut) {
-        float[] hidden = relu(matmulAdd(w1, state, b1));
-        float[] logits = matmulAdd(wActor, hidden, bActor);
-        valueOut[0] = matmulAdd(wCritic, hidden, bCritic)[0];
+    public synchronized void selectAction(float[] state, float[] continuousOut, int[] discreteOut, float[] logProbOut, float[] valueOut) {
+        float[] h1 = leakyRelu(matmulAdd(wBase1, state, bBase1));
+        float[] h2 = leakyRelu(matmulAdd(wBase2, h1, bBase2));
+        float[] logits = matmulAdd(wActor, h2, bActor);
+
+        float[] c1 = leakyRelu(matmulAdd(wCritic1, state, bCritic1));
+        valueOut[0] = matmulAdd(wCritic2, c1, bCritic2)[0];
 
         float muPitch = (float) Math.tanh(logits[0]);
         float muYaw = (float) Math.tanh(logits[1]);
@@ -99,7 +109,7 @@ public class PPOAgent {
         logProbOut[0] = logProbPitch + logProbYaw + logProbDiscreteAcc;
     }
 
-    public void train(List<StepData> memory) {
+    public synchronized void train(List<StepData> memory) {
         int N = memory.size();
         if (N == 0) return;
 
@@ -110,6 +120,7 @@ public class PPOAgent {
 
         for (int i = N - 1; i >= 0; i--) {
             StepData cur = memory.get(i);
+            if (cur.done) gae = 0.0f;
             float nextVal = (i == N - 1 || cur.done) ? 0.0f : memory.get(i + 1).value;
             float delta = cur.reward + gamma * nextVal - cur.value;
             gae = delta + gamma * gaeLambda * gae;
@@ -121,19 +132,20 @@ public class PPOAgent {
         for (float a : advantages) advMean += a;
         advMean /= N;
         for (float a : advantages) advStd += (a - advMean) * (a - advMean);
-        advStd = (float) Math.sqrt(advStd / N) + 1e-8f;
+        advStd = (float) Math.sqrt((advStd / N) + 1e-5f);
 
-        for (int i = 0; i < N; i++) {
-            advantages[i] = (advantages[i] - advMean) / advStd;
-        }
+        for (int i = 0; i < N; i++) advantages[i] = (advantages[i] - advMean) / advStd;
 
         for (int epoch = 0; epoch < 4; epoch++) {
-            Matrix g_w1 = new Matrix(hiddenDim, stateDim);
-            Matrix g_b1 = new Matrix(hiddenDim, 1);
-            Matrix g_wA = new Matrix(actionDim, hiddenDim);
-            Matrix g_bA = new Matrix(actionDim, 1);
-            Matrix g_wC = new Matrix(1, hiddenDim);
-            Matrix g_bC = new Matrix(1, 1);
+            adamStep++;
+
+            Matrix g_wB1 = new Matrix(hiddenDim, stateDim);    Matrix g_bB1 = new Matrix(hiddenDim, 1);
+            Matrix g_wB2 = new Matrix(hiddenDim, hiddenDim);  Matrix g_bB2 = new Matrix(hiddenDim, 1);
+            Matrix g_wA  = new Matrix(actionDim, hiddenDim);  Matrix g_bA  = new Matrix(actionDim, 1);
+
+            Matrix g_wC1 = new Matrix(hiddenDim, stateDim);   Matrix g_bC1 = new Matrix(hiddenDim, 1);
+            Matrix g_wC2 = new Matrix(1, hiddenDim);         Matrix g_bC2 = new Matrix(1, 1);
+
             float[] g_logStd = new float[2];
 
             float stdPitch = (float) Math.exp(logStd[0]);
@@ -142,10 +154,15 @@ public class PPOAgent {
             for (int i = 0; i < N; i++) {
                 StepData data = memory.get(i);
 
-                float[] hiddenRaw = matmulAdd(w1, data.state, b1);
-                float[] hidden = relu(hiddenRaw);
-                float[] logits = matmulAdd(wActor, hidden, bActor);
-                float valuePred = matmulAdd(wCritic, hidden, bCritic)[0];
+                float[] h1Raw = matmulAdd(wBase1, data.state, bBase1);
+                float[] h1 = leakyRelu(h1Raw);
+                float[] h2Raw = matmulAdd(wBase2, h1, bBase2);
+                float[] h2 = leakyRelu(h2Raw);
+                float[] logits = matmulAdd(wActor, h2, bActor);
+
+                float[] c1Raw = matmulAdd(wCritic1, data.state, bCritic1);
+                float[] c1 = leakyRelu(c1Raw);
+                float valuePred = matmulAdd(wCritic2, c1, bCritic2)[0];
 
                 float muPitch = (float) Math.tanh(logits[0]);
                 float muYaw = (float) Math.tanh(logits[1]);
@@ -168,78 +185,107 @@ public class PPOAgent {
 
                 float[] dL_dLogits = new float[actionDim];
 
-                float dLogProb_dMuP = (data.pitchDelta - muPitch) / (stdPitch * stdPitch);
-                float dMuP_dZ0 = 1.0f - (muPitch * muPitch);
-                dL_dLogits[0] = dL_dLogProb * dLogProb_dMuP * dMuP_dZ0;
+                float diffP = (data.pitchDelta - muPitch) / stdPitch;
+                float diffY = (data.yawDelta - muYaw) / stdYaw;
 
-                float dLogProb_dMuY = (data.yawDelta - muYaw) / (stdYaw * stdYaw);
-                float dMuY_dZ1 = 1.0f - (muYaw * muYaw);
-                dL_dLogits[1] = dL_dLogProb * dLogProb_dMuY * dMuY_dZ1;
+                dL_dLogits[0] = dL_dLogProb * (diffP / stdPitch) * (1.0f - muPitch * muPitch);
+                dL_dLogits[1] = dL_dLogProb * (diffY / stdYaw) * (1.0f - muYaw * muYaw);
 
-                g_logStd[0] += dL_dLogProb * ((float) Math.pow((data.pitchDelta - muPitch) / stdPitch, 2) - 1.0f);
-                g_logStd[1] += dL_dLogProb * ((float) Math.pow((data.yawDelta - muYaw) / stdYaw, 2) - 1.0f);
+                g_logStd[0] += dL_dLogProb * (diffP * diffP - 1.0f) - entropyCoeff;
+                g_logStd[1] += dL_dLogProb * (diffY * diffY - 1.0f) - entropyCoeff;
 
                 for (int k = 0; k < 7; k++) {
                     int startIdx = 2 + k * 2;
                     int chosen = data.discreteActions[k];
-                    
-                    float entropy = 0.0f;
-                    for (int act = 0; act < 2; act++) {
-                        float pAct = (float) Math.exp(logProbsDisc[k][act]);
-                        entropy -= pAct * logProbsDisc[k][act];
-                    }
-
                     for (int act = 0; act < 2; act++) {
                         float pAct = (float) Math.exp(logProbsDisc[k][act]);
                         float dLogProb_dLogit = (act == chosen ? 1.0f : 0.0f) - pAct;
-                        float dEnt_dLogit = -pAct * (logProbsDisc[k][act] + entropy);
-                        dL_dLogits[startIdx + act] = dL_dLogProb * dLogProb_dLogit - entropyCoeff * dEnt_dLogit;
+                        dL_dLogits[startIdx + act] += dL_dLogProb * dLogProb_dLogit;
                     }
                 }
 
                 float dL_dValue = 0.5f * (valuePred - returns[i]);
+                float[] dL_dC1 = new float[hiddenDim];
+                for (int h = 0; h < hiddenDim; h++) {
+                    dL_dC1[h] = (c1Raw[h] > 0) ? (wCritic2.data[0][h] * dL_dValue) : 0.01f * (wCritic2.data[0][h] * dL_dValue);
+                }
 
-                float[] dL_dHidden = new float[hiddenDim];
+                for (int h = 0; h < hiddenDim; h++) {
+                    g_bC2.data[0][0] += dL_dValue / N;
+                    g_wC2.data[0][h] += (dL_dValue * c1[h]) / N;
+                    g_bC1.data[h][0] += dL_dC1[h] / N;
+                    for (int s = 0; s < stateDim; s++) g_wC1.data[h][s] += (dL_dC1[h] * data.state[s]) / N;
+                }
+
+                float[] dL_dH2 = new float[hiddenDim];
                 for (int h = 0; h < hiddenDim; h++) {
                     float sum = 0.0f;
                     for (int a = 0; a < actionDim; a++) sum += wActor.data[a][h] * dL_dLogits[a];
-                    sum += wCritic.data[0][h] * dL_dValue;
-                    dL_dHidden[h] = (hiddenRaw[h] > 0) ? sum : 0.0f;
+                    dL_dH2[h] = (h2Raw[h] > 0) ? sum : 0.01f * sum;
+                }
+
+                float[] dL_dH1 = new float[hiddenDim];
+                for (int h = 0; h < hiddenDim; h++) {
+                    float sum = 0.0f;
+                    for (int h2Idx = 0; h2Idx < hiddenDim; h2Idx++) sum += wBase2.data[h2Idx][h] * dL_dH2[h2Idx];
+                    dL_dH1[h] = (h1Raw[h] > 0) ? sum : 0.01f * sum;
                 }
 
                 for (int a = 0; a < actionDim; a++) {
                     g_bA.data[a][0] += dL_dLogits[a] / N;
-                    for (int h = 0; h < hiddenDim; h++) g_wA.data[a][h] += (dL_dLogits[a] * hidden[h]) / N;
+                    for (int h = 0; h < hiddenDim; h++) g_wA.data[a][h] += (dL_dLogits[a] * h2[h]) / N;
                 }
 
-                g_bC.data[0][0] += dL_dValue / N;
-                for (int h = 0; h < hiddenDim; h++) g_wC.data[0][h] += (dL_dValue * hidden[h]) / N;
-
                 for (int h = 0; h < hiddenDim; h++) {
-                    g_b1.data[h][0] += dL_dHidden[h] / N;
-                    for (int s = 0; s < stateDim; s++) g_w1.data[h][s] += (dL_dHidden[h] * data.state[s]) / N;
+                    g_bB2.data[h][0] += dL_dH2[h] / N;
+                    for (int prev = 0; prev < hiddenDim; prev++) g_wB2.data[h][prev] += (dL_dH2[h] * h1[prev]) / N;
+
+                    g_bB1.data[h][0] += dL_dH1[h] / N;
+                    for (int s = 0; s < stateDim; s++) g_wB1.data[h][s] += (dL_dH1[h] * data.state[s]) / N;
                 }
             }
 
-            clipMatrixGradients(g_w1, 1.0f);
-            clipMatrixGradients(g_wA, 1.0f);
-            clipMatrixGradients(g_wC, 1.0f);
+            clipGlobalNorm(new Matrix[]{g_wB1, g_bB1, g_wB2, g_bB2, g_wA, g_bA, g_wC1, g_bC1, g_wC2, g_bC2}, 0.5f);
 
-            w1.adamUpdate(g_w1, m_w1, v_w1, timeStep, lr, beta1, beta2, eps);
-            b1.adamUpdate(g_b1, m_b1, v_b1, timeStep, lr, beta1, beta2, eps);
-            wActor.adamUpdate(g_wA, m_wA, v_wA, timeStep, lr, beta1, beta2, eps);
-            bActor.adamUpdate(g_bA, m_bA, v_bA, timeStep, lr, beta1, beta2, eps);
-            wCritic.adamUpdate(g_wC, m_wC, v_wC, timeStep, lr, beta1, beta2, eps);
-            bCritic.adamUpdate(g_bC, m_bC, v_bC, timeStep, lr, beta1, beta2, eps);
+            wBase1.adamUpdate(g_wB1, m_wB1, v_wB1, adamStep, lr, beta1, beta2, eps);
+            bBase1.adamUpdate(g_bB1, m_bB1, v_bB1, adamStep, lr, beta1, beta2, eps);
+            wBase2.adamUpdate(g_wB2, m_wB2, v_wB2, adamStep, lr, beta1, beta2, eps);
+            bBase2.adamUpdate(g_bB2, m_bB2, v_bB2, adamStep, lr, beta1, beta2, eps);
+
+            wActor.adamUpdate(g_wA, m_wA, v_wA, adamStep, lr, beta1, beta2, eps);
+            bActor.adamUpdate(g_bA, m_bA, v_bA, adamStep, lr, beta1, beta2, eps);
+
+            wCritic1.adamUpdate(g_wC1, m_wC1, v_wC1, adamStep, lr, beta1, beta2, eps);
+            bCritic1.adamUpdate(g_bC1, m_bC1, v_bC1, adamStep, lr, beta1, beta2, eps);
+            wCritic2.adamUpdate(g_wC2, m_wC2, v_wC2, adamStep, lr, beta1, beta2, eps);
+            bCritic2.adamUpdate(g_bC2, m_bC2, v_bC2, adamStep, lr, beta1, beta2, eps);
 
             for (int idx = 0; idx < 2; idx++) {
                 float g = g_logStd[idx] / N;
                 m_logStd[idx] = beta1 * m_logStd[idx] + (1.0f - beta1) * g;
                 v_logStd[idx] = beta2 * v_logStd[idx] + (1.0f - beta2) * (g * g);
-                float mHat = m_logStd[idx] / (1.0f - (float) Math.pow(beta1, timeStep));
-                float vHat = v_logStd[idx] / (1.0f - (float) Math.pow(beta2, timeStep));
+                float mHat = m_logStd[idx] / (1.0f - (float) Math.pow(beta1, adamStep));
+                float vHat = v_logStd[idx] / (1.0f - (float) Math.pow(beta2, adamStep));
                 logStd[idx] -= lr * mHat / ((float) Math.sqrt(vHat) + eps);
                 logStd[idx] = Math.max(-2.0f, Math.min(0.5f, logStd[idx]));
+            }
+        }
+    }
+
+    private void clipGlobalNorm(Matrix[] matrices, float maxNorm) {
+        float sumNormSq = 0.0f;
+        for (Matrix m : matrices) {
+            for (int i = 0; i < m.rows; i++) {
+                for (int j = 0; j < m.cols; j++) sumNormSq += m.data[i][j] * m.data[i][j];
+            }
+        }
+        float globalNorm = (float) Math.sqrt(sumNormSq);
+        if (globalNorm > maxNorm) {
+            float scale = maxNorm / globalNorm;
+            for (Matrix m : matrices) {
+                for (int i = 0; i < m.rows; i++) {
+                    for (int j = 0; j < m.cols; j++) m.data[i][j] *= scale;
+                }
             }
         }
     }
@@ -248,11 +294,13 @@ public class PPOAgent {
         try {
             Files.createDirectories(path.getParent());
             try (DataOutputStream dos = new DataOutputStream(new FileOutputStream(path.toFile()))) {
-                dos.writeInt(timeStep);
+                dos.writeInt(timeStep); dos.writeInt(adamStep);
                 dos.writeFloat(logStd[0]); dos.writeFloat(logStd[1]);
-                writeMatrix(dos, w1); writeMatrix(dos, b1);
+                writeMatrix(dos, wBase1); writeMatrix(dos, bBase1);
+                writeMatrix(dos, wBase2); writeMatrix(dos, bBase2);
                 writeMatrix(dos, wActor); writeMatrix(dos, bActor);
-                writeMatrix(dos, wCritic); writeMatrix(dos, bCritic);
+                writeMatrix(dos, wCritic1); writeMatrix(dos, bCritic1);
+                writeMatrix(dos, wCritic2); writeMatrix(dos, bCritic2);
             }
         } catch (IOException e) { e.printStackTrace(); }
     }
@@ -260,23 +308,15 @@ public class PPOAgent {
     public void loadBrain(Path path) {
         if (!Files.exists(path)) return;
         try (DataInputStream dis = new DataInputStream(new FileInputStream(path.toFile()))) {
-            timeStep = dis.readInt();
+            timeStep = dis.readInt(); adamStep = dis.readInt();
             logStd[0] = dis.readFloat(); logStd[1] = dis.readFloat();
-            readMatrix(dis, w1); readMatrix(dis, b1);
+            readMatrix(dis, wBase1); readMatrix(dis, bBase1);
+            readMatrix(dis, wBase2); readMatrix(dis, bBase2);
             readMatrix(dis, wActor); readMatrix(dis, bActor);
-            readMatrix(dis, wCritic); readMatrix(dis, bCritic);
-            
+            readMatrix(dis, wCritic1); readMatrix(dis, bCritic1);
+            readMatrix(dis, wCritic2); readMatrix(dis, bCritic2);
             resetAdamBuffers();
-            System.out.println("Loaded AI Brain with resynced Adam states! Epoch: " + timeStep);
         } catch (IOException e) { e.printStackTrace(); }
-    }
-
-    private void clipMatrixGradients(Matrix g, float maxVal) {
-        for (int i = 0; i < g.rows; i++) {
-            for (int j = 0; j < g.cols; j++) {
-                g.data[i][j] = Math.max(-maxVal, Math.min(maxVal, g.data[i][j]));
-            }
-        }
     }
 
     private void writeMatrix(DataOutputStream dos, Matrix m) throws IOException {
@@ -305,14 +345,12 @@ public class PPOAgent {
         float[] out = new float[in.length];
         float max = Float.NEGATIVE_INFINITY;
         for (float v : in) if (v > max) max = v;
-        
+
         float sumExp = 0.0f;
         for (float v : in) sumExp += (float) Math.exp(v - max);
         float logSumExp = max + (float) Math.log(sumExp);
 
-        for (int i = 0; i < in.length; i++) {
-            out[i] = in[i] - logSumExp;
-        }
+        for (int i = 0; i < in.length; i++) out[i] = in[i] - logSumExp;
         return out;
     }
 
@@ -331,9 +369,9 @@ public class PPOAgent {
         return out;
     }
 
-    private float[] relu(float[] in) {
+    private float[] leakyRelu(float[] in) {
         float[] out = new float[in.length];
-        for (int i = 0; i < in.length; i++) out[i] = Math.max(0, in[i]);
+        for (int i = 0; i < in.length; i++) out[i] = in[i] > 0 ? in[i] : 0.01f * in[i];
         return out;
     }
 }
