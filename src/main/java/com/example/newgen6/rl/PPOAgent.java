@@ -24,7 +24,7 @@ public class PPOAgent implements Serializable {
     public static final float EPSILON = 0.2f;    // PPO Clip threshold
     
     // Dynamic noise settings (Saved to model state and made public for HUD)
-    public float stdev = 0.35f;                    
+    public float stdev = 0.3f;                    
     private static final float MIN_STDEV = 0.05f;  
     private static final float DECAY_RATE = 0.995f; 
 
