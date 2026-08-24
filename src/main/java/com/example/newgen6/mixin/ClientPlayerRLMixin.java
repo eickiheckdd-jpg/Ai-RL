@@ -17,13 +17,15 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 import java.util.stream.StreamSupport;
 
 @Mixin(ClientPlayerEntity.class)
 public abstract class ClientPlayerRLMixin {
 
     @Unique private final List<StepData> rlMemory = new ArrayList<>();
-    @Unique private UUID lastTargetUuid = null;
+    @Unique private LivingEntity lockedTarget = null;
+    @Unique private boolean isTraining = false;
 
     @Inject(method = "tick", at = @At("HEAD"))
     private void onClientTick(CallbackInfo ci) {
@@ -31,12 +33,16 @@ public abstract class ClientPlayerRLMixin {
 
         ClientPlayerEntity player = (ClientPlayerEntity) (Object) this;
         MinecraftClient client = MinecraftClient.getInstance();
-        if (client.world == null || player.isDead()) return;
 
-        LivingEntity target = getNearestTarget(player, client);
-        if (target == null) return; 
+        if (client.world == null || client.isPaused() || player.isDead()) {
+            rlMemory.clear();
+            return;
+        }
 
-        float[] state = extract30DState(player, target);
+        updateTargetLock(player, client);
+        if (lockedTarget == null) return;
+
+        float[] state = extract30DState(player, lockedTarget);
 
         float[] continuousActions = new float[2];
         int[] discreteActions = new int[7]; 
@@ -45,23 +51,42 @@ public abstract class ClientPlayerRLMixin {
 
         NewGen6RLMod.AGENT.selectAction(state, continuousActions, discreteActions, logProb, value);
 
-        applyInputs(player, client, continuousActions, discreteActions);
+        applyInputsDirect(player, client, continuousActions, discreteActions);
 
-        float reward = calculateTacticalReward(player, client, target, discreteActions);
-        boolean done = target.isDead() || player.isDead();
+        float reward = calculateTacticalReward(player, lockedTarget, discreteActions);
+        boolean done = lockedTarget.isDead() || player.isDead();
 
         rlMemory.add(new StepData(state, continuousActions[0], continuousActions[1], discreteActions, logProb[0], reward, value[0], done));
 
-        // Update HUD metrics
         NewGen6RLMod.lastReward = reward;
         NewGen6RLMod.currentStdPitch = (float) Math.exp(NewGen6RLMod.AGENT.getLogStd()[0]);
         NewGen6RLMod.currentStdYaw = (float) Math.exp(NewGen6RLMod.AGENT.getLogStd()[1]);
         NewGen6RLMod.trainingStep = NewGen6RLMod.AGENT.getTimeStep();
 
-        if (rlMemory.size() >= 128 || done) {
-            NewGen6RLMod.AGENT.train(rlMemory);
+        if ((rlMemory.size() >= 128 || done) && !isTraining) {
+            isTraining = true;
+            List<StepData> memoryToTrain = new ArrayList<>(rlMemory);
             rlMemory.clear();
+
+            CompletableFuture.runAsync(() -> {
+                try {
+                    NewGen6RLMod.AGENT.train(memoryToTrain);
+                } finally {
+                    isTraining = false;
+                }
+            });
         }
+    }
+
+    @Unique
+    private void updateTargetLock(ClientPlayerEntity player, MinecraftClient client) {
+        if (lockedTarget != null && lockedTarget.isAlive() && player.distanceTo(lockedTarget) <= 16.0f) {
+            return; 
+        }
+        lockedTarget = (LivingEntity) StreamSupport.stream(client.world.getEntities().spliterator(), false)
+            .filter(e -> e instanceof LivingEntity && e != player && e.isAlive() && player.distanceTo(e) <= 16.0f)
+            .min(Comparator.comparingDouble(player::distanceTo))
+            .orElse(null);
     }
 
     @Unique
@@ -93,15 +118,15 @@ public abstract class ClientPlayerRLMixin {
         double closingSpeed = relVel.dotProduct(toTarget);
 
         return new float[] {
-            MathHelper.clamp((float) pV.x, -1f, 1f),
-            MathHelper.clamp((float) pV.y, -1f, 1f),
-            MathHelper.clamp((float) pV.z, -1f, 1f),
+            MathHelper.clamp((float) (pV.x * 5.0f), -1f, 1f),
+            MathHelper.clamp((float) (pV.y * 2.0f), -1f, 1f),
+            MathHelper.clamp((float) (pV.z * 5.0f), -1f, 1f),
             MathHelper.clamp((float) (dx / 16.0), -1f, 1f),
             MathHelper.clamp((float) (dy / 16.0), -1f, 1f),
             MathHelper.clamp((float) (dz / 16.0), -1f, 1f),
-            MathHelper.clamp((float) tV.x, -1f, 1f),
-            MathHelper.clamp((float) tV.y, -1f, 1f),
-            MathHelper.clamp((float) tV.z, -1f, 1f),
+            MathHelper.clamp((float) (tV.x * 5.0f), -1f, 1f),
+            MathHelper.clamp((float) (tV.y * 2.0f), -1f, 1f),
+            MathHelper.clamp((float) (tV.z * 5.0f), -1f, 1f),
             yawDiff / 180f, 
             pitchDiff / 90f,
             (float) targetFacingDot,
@@ -109,7 +134,7 @@ public abstract class ClientPlayerRLMixin {
             t.getHealth() / 20f,
             MathHelper.clamp((float) (dist / 16.0), 0f, 1f),
             MathHelper.clamp((float) (closingSpeed / 5.0), -1f, 1f),
-            p.getAttackCooldownProgress(0.5f),
+            p.getAttackCooldownProgress(0.0f),
             t.hurtTime / 10f,
             t.isOnGround() ? 1f : 0f,
             p.isOnGround() ? 1f : 0f,
@@ -127,13 +152,10 @@ public abstract class ClientPlayerRLMixin {
     }
 
     @Unique
-    private void applyInputs(ClientPlayerEntity player, MinecraftClient client, float[] mouseDeltas, int[] keys) {
-        if (Float.isNaN(mouseDeltas[0]) || Float.isNaN(mouseDeltas[1]) ||
-            Float.isInfinite(mouseDeltas[0]) || Float.isInfinite(mouseDeltas[1])) {
-            return;
-        }
+    private void applyInputsDirect(ClientPlayerEntity player, MinecraftClient client, float[] mouseDeltas, int[] keys) {
+        if (Float.isNaN(mouseDeltas[0]) || Float.isNaN(mouseDeltas[1])) return;
 
-        float maxDegreesPerTick = 2.5f;
+        float maxDegreesPerTick = 45.0f; 
         float pitchDelta = (float) Math.tanh(mouseDeltas[0]) * maxDegreesPerTick;
         float yawDelta   = (float) Math.tanh(mouseDeltas[1]) * maxDegreesPerTick;
 
@@ -141,32 +163,20 @@ public abstract class ClientPlayerRLMixin {
         player.setYaw(player.getYaw() + yawDelta);
 
         if (NewGen6RLMod.allowMovement) {
-            client.options.forwardKey.setPressed(keys[0] == 1);
-            client.options.backKey.setPressed(keys[1] == 1);
-            client.options.leftKey.setPressed(keys[2] == 1);
-            client.options.rightKey.setPressed(keys[3] == 1);
-            client.options.jumpKey.setPressed(keys[4] == 1);
-            client.options.sprintKey.setPressed(keys[5] == 1);
-        } else {
-            client.options.forwardKey.setPressed(false);
-            client.options.backKey.setPressed(false);
-            client.options.leftKey.setPressed(false);
-            client.options.rightKey.setPressed(false);
-            client.options.jumpKey.setPressed(false);
-            client.options.sprintKey.setPressed(false);
+            player.input.movementForward = (keys[0] == 1 ? 1.0f : 0.0f) - (keys[1] == 1 ? 1.0f : 0.0f);
+            player.input.movementSideways = (keys[2] == 1 ? 1.0f : 0.0f) - (keys[3] == 1 ? 1.0f : 0.0f);
+            player.input.jumping = (keys[4] == 1);
+            player.setSprinting(keys[5] == 1);
         }
 
-        // Unrestricted attack input (AI can swing at air, blocks, or entities freely)
-        client.options.attackKey.setPressed(keys[6] == 1);
+        if (keys[6] == 1 && player.getAttackCooldownProgress(0.0f) >= 0.9f) {
+            client.interactionManager.attackEntity(player, lockedTarget);
+            player.swingHand(net.minecraft.util.Hand.MAIN_HAND);
+        }
     }
 
     @Unique
-    private float calculateTacticalReward(ClientPlayerEntity player, MinecraftClient client, LivingEntity target, int[] discreteActions) {
-        if (lastTargetUuid == null || !lastTargetUuid.equals(target.getUuid())) {
-            lastTargetUuid = target.getUuid();
-            return 0f;
-        }
-
+    private float calculateTacticalReward(ClientPlayerEntity player, LivingEntity target, int[] discreteActions) {
         Vec3d lookDir = player.getRotationVector();
         Vec3d toTarget = new Vec3d(
             target.getX() - player.getX(), 
@@ -177,27 +187,23 @@ public abstract class ClientPlayerRLMixin {
 
         float reward = 0f;
 
-        // Exponential tracking shaping
         if (alignment > 0.0f) {
             reward += (float) Math.pow(alignment, 4.0) * 0.4f;
         } else {
             reward -= 0.05f; 
         }
 
-        // Pure positive incentive for successful attack timing (no whiff penalties)
         boolean isAttacking = (discreteActions[6] == 1);
-        if (isAttacking && alignment > 0.85f) {
-            reward += 2.0f; 
+        float cooldown = player.getAttackCooldownProgress(0.0f);
+
+        if (isAttacking) {
+            if (alignment > 0.85f && cooldown >= 0.9f) {
+                reward += 2.0f; 
+            } else if (cooldown < 0.8f) {
+                reward -= 0.5f; 
+            }
         }
 
         return reward;
-    }
-
-    @Unique
-    private LivingEntity getNearestTarget(ClientPlayerEntity player, MinecraftClient client) {
-        return (LivingEntity) StreamSupport.stream(client.world.getEntities().spliterator(), false)
-            .filter(e -> e instanceof LivingEntity && e != player && e.isAlive())
-            .min(Comparator.comparingDouble(player::distanceTo))
-            .orElse(null);
     }
 }
