@@ -1,4 +1,4 @@
-package com.example.newgen6.rl;
+package com.example.newgen6;
 
 public class Experience {
     public final double[] state;
