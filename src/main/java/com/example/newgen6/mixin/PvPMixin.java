@@ -21,6 +21,7 @@ public abstract class PvPMixin {
     @Unique private final float[] state = new float[8];
     @Unique private final float[] nextState = new float[8];
     @Unique private final float[] actions = new float[5];
+    @Unique private int saveTimer = 0;
 
     @Inject(method = "tick", at = @At("HEAD"))
     private void onTick(CallbackInfo ci) {
@@ -37,24 +38,36 @@ public abstract class PvPMixin {
         extractState(p, t, state);
         AGENT.selectAction(state, actions);
 
-        // Native Camera, Key, and Mouse Inputs
+        // Native Inputs
         p.setYaw(p.getYaw() + (actions[0] * 15.0f));
         p.setPitch(Math.max(-90.0f, Math.min(90.0f, p.getPitch() + (actions[1] * 15.0f))));
 
         p.input.playerInput = new PlayerInput(
-            actions[2] > 0.0f,  // W
-            actions[2] < -0.3f, // S
-            false, false,       // Strafe A/D
-            actions[4] > 0.5f,  // Jump
-            false,              // Sneak
-            actions[3] > 0.0f   // Sprint
+            actions[2] > 0.0f,  
+            actions[2] < -0.3f, 
+            false, false,       
+            actions[4] > 0.5f,  
+            false,              
+            actions[3] > 0.0f   
         );
         p.setSprinting(actions[3] > 0.0f);
-        client.options.attackKey.setPressed(actions[4] > 0.0f); // Native Left-Click Injection
+        client.options.attackKey.setPressed(actions[4] > 0.0f);
 
         extractState(p, t, nextState);
         float reward = calculateReward(p, t, actions[4] > 0.0f);
         AGENT.trainAsync(state, actions, reward, nextState);
+
+        // 1. Periodic Auto-Save Every 5 Minutes (6000 Ticks)
+        saveTimer++;
+        if (saveTimer >= 6000) {
+            AGENT.saveBrainAsync();
+            saveTimer = 0;
+        }
+
+        // 2. Instant Match End Save (Saves immediately on player death or target elimination)
+        if (t.isDead() || p.getHealth() <= 0) {
+            AGENT.saveBrainAsync();
+        }
     }
 
     @Unique
@@ -64,10 +77,10 @@ public abstract class PvPMixin {
         out[0] = (float) (t.getX() - p.getX()) / 16.0f;
         out[1] = (float) (t.getY() - p.getY()) / 16.0f;
         out[2] = (float) (t.getZ() - p.getZ()) / 16.0f;
-        out[3] = (float) look.dotProduct(toT);            // Crosshair alignment
+        out[3] = (float) look.dotProduct(toT);            
         out[4] = p.getHealth() / 20.0f;
         out[5] = t.getHealth() / 20.0f;
-        out[6] = p.getAttackCooldownProgress(0.0f);       // 1.9+ Cooldown bar
+        out[6] = p.getAttackCooldownProgress(0.0f);       
         out[7] = p.distanceTo(t) / 16.0f;
     }
 
@@ -77,13 +90,12 @@ public abstract class PvPMixin {
         float cd = p.getAttackCooldownProgress(0.0f);
         double dist = p.distanceTo(t);
 
-        // Natural Anti-Spam Penalties & Patience Rewards
         if (clicked) {
-            if (cd < 0.9f) r -= 0.5f; // Spam click penalty
-            else if (dist <= 3.0f) r += 1.5f; // Well-timed swing reward
+            if (cd < 0.9f) r -= 0.5f; 
+            else if (dist <= 3.0f) r += 1.5f; 
         }
-        if (t.hurtTime == 10) r += 10.0f;  // Target damaged
-        if (p.hurtTime == 10) r -= 5.0f;   // Player took damage
+        if (t.hurtTime == 10) r += 10.0f;  
+        if (p.hurtTime == 10) r -= 5.0f;   
         return r;
     }
 }
