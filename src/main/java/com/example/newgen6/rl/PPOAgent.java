@@ -32,7 +32,7 @@ public class PPOAgent {
         // Fixed: Mouse controls do NOT stop when training starts
         actor.forward(state, outActions);
         for (int i = 0; i < actionDim; i++) {
-            outActions[i] += (float) (Math.random() - 0.5) * 0.2f;
+            outActions[i] += (float) (Math.random() - 0.5) * 0.35f;
         }
     }
 
