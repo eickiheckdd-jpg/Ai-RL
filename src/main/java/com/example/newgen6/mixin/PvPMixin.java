@@ -1,5 +1,6 @@
 package com.example.newgen6.mixin;
 
+import com.example.newgen6.NewGen6RLMod;
 import com.example.newgen6.rl.PPOEngine;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
@@ -30,6 +31,12 @@ public abstract class PvPMixin {
 
         if (client.world == null || p.isDead() || p.isRemoved()) return;
 
+        // Process Key Press Input for 'C'
+        NewGen6RLMod.checkToggle(client);
+
+        // If AI is toggled OFF, bypass AI logic so you keep manual control
+        if (!NewGen6RLMod.aiActive) return;
+
         PlayerEntity t = StreamSupport.stream(client.world.getEntities().spliterator(), false)
             .filter(e -> e instanceof PlayerEntity && e != p && e.isAlive() && !e.isRemoved() && p.distanceTo(e) <= 16.0f)
             .map(e -> (PlayerEntity) e)
@@ -41,23 +48,22 @@ public abstract class PvPMixin {
         extractState(p, t, state);
         AGENT.selectAction(state, actions);
 
-        // Continuous Pitch and Yaw Control
+        // Pitch and Yaw Control
         p.setYaw(p.getYaw() + (actions[0] * 18.0f)); 
         p.setPitch(Math.max(-90.0f, Math.min(90.0f, p.getPitch() + (actions[1] * 18.0f)))); 
 
-        // Separated Input Injection
+        // Input Injection
         p.input.playerInput = new PlayerInput(
-            actions[2] > 0.0f,   // W (Forward)
-            actions[2] < -0.3f,  // S (Backward)
-            actions[5] > 0.2f,   // A (Strafe Left)
-            actions[6] > 0.2f,   // D (Strafe Right)
-            actions[3] > 0.5f,   // Space (Jump)
+            actions[2] > 0.0f,   // Forward
+            actions[2] < -0.3f,  // Backward
+            actions[5] > 0.2f,   // Strafe Left
+            actions[6] > 0.2f,   // Strafe Right
+            actions[3] > 0.5f,   // Jump
             false,               // Sneak
             actions[2] > 0.5f    // Sprint
         );
         p.setSprinting(actions[2] > 0.5f);
 
-        // Independent Sword Swing Input
         boolean isAttacking = actions[4] > 0.2f;
         client.options.attackKey.setPressed(isAttacking); 
 
@@ -99,13 +105,12 @@ public abstract class PvPMixin {
         float cd = p.getAttackCooldownProgress(0.0f);
         double dist = p.distanceTo(t);
 
-        // Ideal Hit-Range Reward
         if (dist >= 2.3 && dist <= 3.0) r += 0.1f;
 
         if (clicked) {
-            if (cd < 0.9f) r -= 0.6f;             // Penalty: Early spam click
-            else if (t.hurtTime > 0) r -= 0.8f;   // Penalty: Hitting during invulnerability
-            else if (dist <= 3.0f) r += 2.0f;     // Reward: Timed strike
+            if (cd < 0.9f) r -= 0.6f;             
+            else if (t.hurtTime > 0) r -= 0.8f;   
+            else if (dist <= 3.0f) r += 2.0f;     
         }
         
         if (t.hurtTime == 10) r += 10.0f;         
