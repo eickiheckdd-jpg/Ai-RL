@@ -105,9 +105,9 @@ public abstract class ClientPlayerRLMixin {
             p.isSprinting() ? 1f : 0f,
             p.isSubmergedInWater() ? 1f : 0f,
             p.horizontalCollision ? 1f : 0f,
-            p.fallDistance / 5f,
+            (float) (p.fallDistance / 5.0), // Fixed: explicit float cast
             p.handSwinging ? 1f : 0f,
-            t.fallDistance / 5f,
+            (float) (t.fallDistance / 5.0), // Fixed: explicit float cast
             (float) Math.sqrt(tV.x * tV.x + tV.z * tV.z),
             t.isSprinting() ? 1f : 0f,
             (float) playerLookDot,
