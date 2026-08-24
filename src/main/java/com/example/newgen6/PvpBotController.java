@@ -1,10 +1,10 @@
 package com.example.newgen6;
 
-import com.example.newgen6.game.ActionExecutor;
-import com.example.newgen6.game.ActionType;
-import com.example.newgen6.game.RewardCalculator;
-import com.example.newgen6.game.StateExtractor;
-import com.example.newgen6.rl.PPOAgent;
+import com.example.newgen6.ActionExecutor;
+import com.example.newgen6.ActionType;
+import com.example.newgen6.RewardCalculator;
+import com.example.newgen6.StateExtractor;
+import com.example.newgen6.PPOAgent;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.entity.player.PlayerEntity;
 
