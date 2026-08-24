@@ -47,23 +47,30 @@ public class NewGen6RLMod implements ClientModInitializer {
     MinecraftClient client = MinecraftClient.getInstance();
     if (!showHud || client.options.hudHidden || client.textRenderer == null) return;
 
-    // 1. Draw Translucent Background (ARGB: 0x80 = ~50% Alpha, 0x101010 = Dark Grey)
-    int backgroundColor = 0x80101010; 
-    context.fill(6, 6, 155, 48, backgroundColor);
+    try {
+        // Safe null check on player/agent context
+        float currentReward = lastReward;
+        float currentStdev = (AGENT != null) ? AGENT.stdev : 0.0f;
 
-    // 2. Draw Borders for better visual clarity
-    context.drawBorder(6, 6, 149, 42, 0xFFFFAA00);
+        // 1. Draw Background Box (ARGB: 0x90 = Dark semi-transparent background)
+        context.fill(6, 6, 160, 72, 0x90000000);
+        
+        // 2. Optional Outline Border to confirm HUD bounds
+        context.drawBorder(6, 6, 154, 66, 0xFFFFAA00);
 
-    // 3. Render Text Layers with explicit ARGB Hex Colors
-    // Title: Gold (0xFFFF00 / ARGB: 0xFFFFAA00)
-    context.drawText(client.textRenderer, Text.literal("PPO AI TRAINER"), 12, 10, 0xFFFFAA00, false);
+        // 3. Render Text Stack (0xFF prefix forces full opacity)
+        context.drawText(client.textRenderer, "PPO AI TRAINER", 12, 10, 0xFFFFAA00, false);
 
-    // AI Status: Green (ON) / Red (OFF)
-    String aiStatus = "AI: " + (aiEnabled ? "ON" : "OFF");
-    int aiColor = aiEnabled ? 0xFF55FF55 : 0xFFFF5555;
-    context.drawText(client.textRenderer, Text.literal(aiStatus), 12, 22, aiColor, false);
+        String aiStatus = "AI: " + (aiEnabled ? "ON" : "OFF");
+        int aiColor = aiEnabled ? 0xFF55FF55 : 0xFFFF5555;
+        context.drawText(client.textRenderer, aiStatus, 12, 22, aiColor, false);
 
-    // Reward: Yellow
-    String rewardStr = String.format("Reward: %.2f", lastReward);
-    context.drawText(client.textRenderer, Text.literal(rewardStr), 12, 34, 0xFFFFFF55, false);
+        context.drawText(client.textRenderer, String.format("Reward: %.2f", currentReward), 12, 34, 0xFFFFFF55, false);
+        context.drawText(client.textRenderer, String.format("Noise (STDEV): %.3f", currentStdev), 12, 46, 0xFF55FFFF, false);
+        context.drawText(client.textRenderer, "Epsilon: 0.20", 12, 58, 0xFFAAAAFF, false);
+
+    } catch (Exception e) {
+        // Catch any rendering crashes silently to prevent black-box locking
+        e.printStackTrace();
+    }
 });
