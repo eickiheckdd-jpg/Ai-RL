@@ -7,7 +7,6 @@ import java.util.concurrent.CompletableFuture;
 public class PPOEngine {
     private final int stateDim = 13, hiddenDim = 24, actionDim = 7;
     
-    // Deep Neural Weights
     private final float[] wActor1 = new float[stateDim * hiddenDim];
     private final float[] wActor2 = new float[hiddenDim * actionDim];
     private final float[] wCritic1 = new float[stateDim * hiddenDim];
@@ -33,36 +32,32 @@ public class PPOEngine {
         for (int i = 0; i < arr.length; i++) arr[i] = (rand.nextFloat() - 0.5f) * 0.1f;
     }
 
-    // Forward Pass with ReLU Hidden Layer
     public void selectAction(float[] state, float[] outActions) {
         float[] hidden = new float[hiddenDim];
         for (int i = 0; i < hiddenDim; i++) {
             float sum = 0.0f;
             for (int j = 0; j < stateDim; j++) sum += state[j] * wActor1[i * stateDim + j];
-            hidden[i] = Math.max(0.0f, sum); // ReLU Activation
+            hidden[i] = Math.max(0.0f, sum);
         }
 
         for (int i = 0; i < actionDim; i++) {
             float sum = 0.0f;
             for (int j = 0; j < hiddenDim; j++) sum += hidden[j] * wActor2[i * hiddenDim + j];
             float mean = (float) Math.tanh(sum);
-            // Dynamic exploration noise
             float noise = (float) (rand.nextGaussian() * (stdev * (1.1f - Math.abs(state[3]))));
             outActions[i] = Math.max(-1.0f, Math.min(1.0f, mean + noise));
         }
     }
 
-    // Async Backpropagation & PPO Updates
     public void trainAsync(float[] stateIn, float[] actionsIn, float reward, float[] nextStateIn) {
         final float[] state = stateIn.clone();
         final float[] actions = actionsIn.clone();
         final float[] nextState = nextStateIn.clone();
 
         CompletableFuture.runAsync(() -> {
-            // Live Progress Tracker
             totalRewardTracker += reward;
             trainingSteps++;
-            if (trainingSteps % 1200 == 0) { // Logs progress every 1 minute
+            if (trainingSteps % 1200 == 0) {
                 System.out.printf("[PPO Engine] 1-Min Avg Reward: %.3f | Current Noise: %.4f%n", 
                                   (totalRewardTracker / 1200.0f), stdev);
                 totalRewardTracker = 0.0f;
@@ -79,7 +74,6 @@ public class PPOEngine {
 
             float advantage = reward + (0.98f * vNext) - vCurrent;
 
-            // Critic Weight Update
             for (int i = 0; i < hiddenDim; i++) {
                 wCritic2[i] += 0.005f * Math.max(-1.0f, Math.min(1.0f, advantage * hCurr[i]));
                 for (int j = 0; j < stateDim; j++) {
@@ -87,7 +81,6 @@ public class PPOEngine {
                 }
             }
 
-            // Actor Weight Update
             float[] hActor = forwardHidden(state, wActor1);
             for (int i = 0; i < actionDim; i++) {
                 float grad = Math.max(-0.2f, Math.min(0.2f, advantage * actions[i]));
