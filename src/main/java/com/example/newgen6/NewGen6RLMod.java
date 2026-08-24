@@ -4,11 +4,10 @@ import com.example.newgen6.rl.PPOAgent;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.fabricmc.fabric.api.client.rendering.v1.HudLayerRegistrationCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.util.InputUtil;
-import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
 public class NewGen6RLMod implements ClientModInitializer {
@@ -28,6 +27,7 @@ public class NewGen6RLMod implements ClientModInitializer {
 
     @Override
     public void onInitializeClient() {
+        // Register keybindings safely using standard category translation key strings
         toggleHudKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
             "key.newgen6.toggle_hud",
             InputUtil.Type.KEYSYM,
@@ -51,29 +51,23 @@ public class NewGen6RLMod implements ClientModInitializer {
             }
         });
 
-        // 1.21.11 HUD Layer Registration
-        HudLayerRegistrationCallback.EVENT.register(layeredDrawer -> {
-            layeredDrawer.attachLayerAfter(
-                Identifier.of("minecraft", "debug_text"),
-                Identifier.of("newgen6", "rl_trainer_hud"),
-                (context, tickCounter) -> {
-                    if (!showHud) return;
-                    MinecraftClient client = MinecraftClient.getInstance();
-                    if (client.options.hudHidden) return;
+        // Stable HUD Render Callback across modern Fabric versions
+        HudRenderCallback.EVENT.register((drawContext, tickCounter) -> {
+            if (!showHud) return;
+            MinecraftClient client = MinecraftClient.getInstance();
+            if (client.options.hudHidden) return;
 
-                    int x = 10;
-                    int y = 10;
-                    int color = 0xFFFFFF;
+            int x = 10;
+            int y = 10;
+            int color = 0xFFFFFF;
 
-                    context.fill(x - 4, y - 4, x + 165, y + 62, 0x90000000);
+            drawContext.fill(x - 4, y - 4, x + 165, y + 62, 0x90000000);
 
-                    context.drawText(client.textRenderer, "§6=== PPO AI TRAINER ===", x, y, color, true);
-                    context.drawText(client.textRenderer, "AI Active: " + (aiEnabled ? "§aON" : "§cOFF"), x, y + 12, color, true);
-                    context.drawText(client.textRenderer, String.format("Last Reward: §e%.2f", lastReward), x, y + 24, color, true);
-                    context.drawText(client.textRenderer, String.format("Std (P/Y): §b%.3f, %.3f", currentStdPitch, currentStdYaw), x, y + 36, color, true);
-                    context.drawText(client.textRenderer, "Training Step: §f" + trainingStep, x, y + 48, color, true);
-                }
-            );
+            drawContext.drawText(client.textRenderer, "§6=== PPO AI TRAINER ===", x, y, color, true);
+            drawContext.drawText(client.textRenderer, "AI Active: " + (aiEnabled ? "§aON" : "§cOFF"), x, y + 12, color, true);
+            drawContext.drawText(client.textRenderer, String.format("Last Reward: §e%.2f", lastReward), x, y + 24, color, true);
+            drawContext.drawText(client.textRenderer, String.format("Std (P/Y): §b%.3f, %.3f", currentStdPitch, currentStdYaw), x, y + 36, color, true);
+            drawContext.drawText(client.textRenderer, "Training Step: §f" + trainingStep, x, y + 48, color, true);
         });
     }
 }
