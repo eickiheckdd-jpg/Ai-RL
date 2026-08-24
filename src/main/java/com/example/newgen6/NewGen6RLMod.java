@@ -13,7 +13,6 @@ import org.lwjgl.glfw.GLFW;
 import java.nio.file.Path;
 
 public class NewGen6RLMod implements ClientModInitializer {
-    // Upgraded to 21 State Dimensions for tactical combat inputs
     public static final PPOAgent AGENT = new PPOAgent(21, 256); 
     public static boolean aiEnabled = false;
     private static KeyBinding toggleAiKey;
@@ -28,7 +27,7 @@ public class NewGen6RLMod implements ClientModInitializer {
             "key.newgen6.toggle", 
             InputUtil.Type.KEYSYM, 
             GLFW.GLFW_KEY_C, 
-            "category.newgen6.title"
+            "key.category.newgen6.title"
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
