@@ -1,4 +1,4 @@
-package com.example.newgen6.rl;
+package com.example.newgen6;
 
 import java.io.*;
 import java.util.ArrayList;
