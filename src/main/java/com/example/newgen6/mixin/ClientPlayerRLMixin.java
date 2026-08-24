@@ -6,7 +6,6 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.Hand;
 import net.minecraft.util.PlayerInput;
-import net.minecraft.util.math.MathHelper;
 import net.minecraft.util.math.Vec3d;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.Unique;
@@ -38,18 +37,15 @@ public abstract class ClientPlayerRLMixin {
         if (lockedTarget == null) return;
 
         extractState(player, lockedTarget, stateBuffer);
-        
-        // 1. Get Actions
+
         NewGen6RLMod.AGENT.selectAction(stateBuffer, actionBuffer);
         for (float act : actionBuffer) if (Float.isNaN(act)) return;
 
-        // 2. Apply Movement & Aim
         applyInputs(player, client, actionBuffer);
 
-        // 3. Calculate Reward & Store Step
         float reward = calculateReward(player, lockedTarget, actionBuffer);
         boolean done = lockedTarget.isDead() || player.isDead();
-        
+
         NewGen6RLMod.lastReward = reward;
         NewGen6RLMod.AGENT.storeMemoryAndTrain(stateBuffer, actionBuffer, reward, done);
     }
@@ -57,13 +53,11 @@ public abstract class ClientPlayerRLMixin {
     @Unique
     private void extractState(ClientPlayerEntity p, PlayerEntity t, float[] out) {
         Vec3d pV = p.getVelocity();
-        Vec3d tV = t.getVelocity();
         double dx = t.getX() - p.getX(), dy = t.getEyeY() - p.getEyeY(), dz = t.getZ() - p.getZ();
         out[0] = (float) pV.x; out[1] = (float) pV.y; out[2] = (float) pV.z;
         out[3] = (float) dx; out[4] = (float) dy; out[5] = (float) dz;
         out[6] = p.getHealth(); out[7] = t.getHealth();
         out[8] = p.getAttackCooldownProgress(0.0f);
-        // ... (Remaining 21 physics variables flattened into `out`)
     }
 
     @Unique
@@ -84,7 +78,7 @@ public abstract class ClientPlayerRLMixin {
     private boolean isLookingAtBox(ClientPlayerEntity player, PlayerEntity target) {
         Vec3d look = player.getRotationVector();
         Vec3d toTarget = target.getBoundingBox().getCenter().subtract(player.getEyePos()).normalize();
-        return look.dotProduct(toTarget) > 0.95; // Instant math raycast
+        return look.dotProduct(toTarget) > 0.95;
     }
 
     @Unique
