@@ -9,60 +9,51 @@ import net.minecraft.text.Text;
 import org.lwjgl.glfw.GLFW;
 
 public class Newgen6Client implements ClientModInitializer {
-    public static boolean agentActive = false;
-    private static KeyBinding toggleKey;
-    private static KeyBinding trainToggleKey;
 
-    private PPOAgent ppoAgent;
-    private double[] lastState;
-    private int lastAction;
+    public static PvpBotController controller;
+    private static KeyBinding toggleKey;
+    private static KeyBinding toggleCKey;
+    private static KeyBinding saveKey;
 
     @Override
     public void onInitializeClient() {
-        ppoAgent = new PPOAgent(11, 5); // 11 state features, 5 discrete actions
+        controller = new PvpBotController();
+        controller.loadWeights();
 
+        // FIX: Replaced String with KeyBinding.Category.MISC
         toggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.newgen6.toggle",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_P,
                 KeyBinding.Category.MISC));
+                
+        // NEW: AI toggle bound to 'C'
+        toggleCKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.newgen6.toggle_c",
+                InputUtil.Type.KEYSYM,
+                GLFW.GLFW_KEY_C,
+                KeyBinding.Category.MISC));
 
-        trainToggleKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.newgen6.train",
+        saveKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.newgen6.save",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_O,
                 KeyBinding.Category.MISC));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            if (toggleKey.wasPressed()) {
-                agentActive = !agentActive;
+            // Checks if either P or C was pressed to toggle the bot
+            while (toggleKey.wasPressed() || toggleCKey.wasPressed()) {
+                controller.enabled = !controller.enabled;
                 if (client.player != null) {
-                    client.player.sendMessage(Text.literal("PPO Agent Active: " + agentActive), false);
+                    client.player.sendMessage(
+                            Text.literal("[newgen6] Bot " + (controller.enabled ? "ENABLED" : "disabled")),
+                            false);
                 }
             }
-
-            if (trainToggleKey.wasPressed()) {
-                ppoAgent.setTraining(!ppoAgent.isTraining());
-                if (client.player != null) {
-                    client.player.sendMessage(Text.literal("PPO Training Mode: " + ppoAgent.isTraining()), false);
-                }
+            while (saveKey.wasPressed()) {
+                controller.saveWeights();
             }
-
-            if (agentActive && client.player != null && client.world != null) {
-                double[] currentState = StateExtractor.extractState(client);
-                
-                if (ppoAgent.isTraining() && lastState != null) {
-                    double reward = RewardCalculator.calculateReward(client);
-                    ppoAgent.storeTransition(lastState, lastAction, reward, currentState);
-                    ppoAgent.trainStep();
-                }
-
-                int action = ppoAgent.selectAction(currentState);
-                ActionExecutor.execute(action, client);
-
-                lastState = currentState;
-                lastAction = action;
-            }
+            controller.onTick(client);
         });
     }
 }
