@@ -19,7 +19,8 @@ import java.util.stream.StreamSupport;
 @Mixin(ClientPlayerEntity.class)
 public abstract class ClientPlayerRLMixin {
     @Unique private PlayerEntity lockedTarget = null;
-    @Unique private final float[] stateBuffer = new float[30];
+    // Fixed size: 12 elements
+    @Unique private final float[] stateBuffer = new float[12];
     @Unique private final float[] actionBuffer = new float[8];
 
     @Inject(method = "tick", at = @At("HEAD"))
@@ -53,11 +54,30 @@ public abstract class ClientPlayerRLMixin {
     @Unique
     private void extractState(ClientPlayerEntity p, PlayerEntity t, float[] out) {
         Vec3d pV = p.getVelocity();
-        double dx = t.getX() - p.getX(), dy = t.getEyeY() - p.getEyeY(), dz = t.getZ() - p.getZ();
-        out[0] = (float) pV.x; out[1] = (float) pV.y; out[2] = (float) pV.z;
-        out[3] = (float) dx; out[4] = (float) dy; out[5] = (float) dz;
-        out[6] = p.getHealth(); out[7] = t.getHealth();
-        out[8] = p.getAttackCooldownProgress(0.0f);
+        double dx = t.getX() - p.getX();
+        double dy = t.getEyeY() - p.getEyeY();
+        double dz = t.getZ() - p.getZ();
+        Vec3d look = p.getRotationVector();
+
+        // Normalized distances (-1.0 to 1.0 based on 16 block max range)
+        out[0] = (float) (dx / 16.0);
+        out[1] = (float) (dy / 16.0);
+        out[2] = (float) (dz / 16.0);
+        
+        // Velocity
+        out[3] = (float) pV.x;
+        out[4] = (float) pV.y;
+        out[5] = (float) pV.z;
+
+        // Player look angles and orientation vectors
+        out[6] = (float) look.x;
+        out[7] = (float) look.y;
+        out[8] = (float) look.z;
+
+        // Health and Attack Cooldowns (Normalized 0.0 to 1.0)
+        out[9] = p.getHealth() / 20.0f;
+        out[10] = t.getHealth() / 20.0f;
+        out[11] = p.getAttackCooldownProgress(0.0f);
     }
 
     @Unique
@@ -65,7 +85,15 @@ public abstract class ClientPlayerRLMixin {
         double mult = Math.pow(client.options.getMouseSensitivity().getValue() * 0.6 + 0.2, 3) * 8.0;
         player.changeLookDirection(actions[1] * mult, actions[0] * mult);
 
-        player.input.playerInput = new PlayerInput(actions[2] > 0, actions[2] < 0, actions[3] < 0, actions[3] > 0, actions[4] > 0, actions[7] > 0, actions[5] > 0);
+        player.input.playerInput = new PlayerInput(
+            actions[2] > 0, 
+            actions[2] < 0, 
+            actions[3] < 0, 
+            actions[3] > 0, 
+            actions[4] > 0, 
+            actions[7] > 0, 
+            actions[5] > 0
+        );
         player.setSprinting(actions[5] > 0);
 
         if (actions[6] > 0.5f && isLookingAtBox(player, lockedTarget)) {
