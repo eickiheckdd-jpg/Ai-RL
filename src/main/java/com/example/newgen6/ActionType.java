@@ -1,4 +1,4 @@
-package com.example.newgen6.game;
+package com.example.newgen6;
 
 /**
  * Every action here is something a real player could do with a keyboard and
