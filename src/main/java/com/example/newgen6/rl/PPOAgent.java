@@ -7,25 +7,20 @@ import java.util.List;
 import java.util.Random;
 
 public class PPOAgent {
-    // 16 Actor Outputs: 2 continuous (Pitch/Yaw) + 7 binary discrete heads (14 logits)
     private final int stateDim, hiddenDim, actionDim = 16;
     private final float lr = 0.0003f, gamma = 0.99f, gaeLambda = 0.95f, clipEps = 0.2f;
     private final float entropyCoeff = 0.01f; 
 
-    // Adam Optimizer Hyperparameters
     private final float beta1 = 0.9f, beta2 = 0.999f, eps = 1e-8f;
     private int timeStep = 0;
 
-    // Weight Matrices & Biases
     public Matrix w1, b1, wActor, bActor, wCritic, bCritic;
     
-    // Adam First (m) and Second (v) Moment Accumulators
     private Matrix m_w1, v_w1, m_b1, v_b1;
     private Matrix m_wA, v_wA, m_bA, v_bA;
     private Matrix m_wC, v_wC, m_bC, v_bC;
 
-    // Dynamic Log Standard Deviations for Pitch (0) and Yaw (1)
-    private final float[] logStd = new float[] { -0.5f, -0.5f }; // Default std ≈ 0.6
+    private final float[] logStd = new float[] { -0.5f, -0.5f };
     private final float[] m_logStd = new float[2];
     private final float[] v_logStd = new float[2];
 
@@ -35,7 +30,6 @@ public class PPOAgent {
         this.stateDim = stateDim;
         this.hiddenDim = hiddenDim;
 
-        // Weights Initialization
         this.w1 = Matrix.randomXavier(hiddenDim, stateDim, rng);
         this.b1 = new Matrix(hiddenDim, 1);
         this.wActor = Matrix.randomXavier(actionDim, hiddenDim, rng);
@@ -43,7 +37,10 @@ public class PPOAgent {
         this.wCritic = Matrix.randomXavier(1, hiddenDim, rng);
         this.bCritic = new Matrix(1, 1);
 
-        // Adam State Buffers
+        resetAdamBuffers();
+    }
+
+    private void resetAdamBuffers() {
         this.m_w1 = new Matrix(hiddenDim, stateDim); this.v_w1 = new Matrix(hiddenDim, stateDim);
         this.m_b1 = new Matrix(hiddenDim, 1);        this.v_b1 = new Matrix(hiddenDim, 1);
         this.m_wA = new Matrix(actionDim, hiddenDim); this.v_wA = new Matrix(actionDim, hiddenDim);
@@ -55,7 +52,7 @@ public class PPOAgent {
     public static class StepData {
         public float[] state; 
         public float pitchDelta, yawDelta; 
-        public int[] discreteActions; // 7 binary choices: [W, S, A, D, Jump, Sprint, Attack]
+        public int[] discreteActions;
         public float logProb, reward, value; 
         public boolean done;
 
@@ -70,24 +67,20 @@ public class PPOAgent {
         float[] logits = matmulAdd(wActor, hidden, bActor);
         valueOut[0] = matmulAdd(wCritic, hidden, bCritic)[0];
 
-        // Continuous means bounded inside [-1.0, 1.0]
         float muPitch = (float) Math.tanh(logits[0]);
         float muYaw = (float) Math.tanh(logits[1]);
 
         float stdPitch = (float) Math.exp(logStd[0]);
         float stdYaw = (float) Math.exp(logStd[1]);
 
-        // Sample continuous actions using learned std
         continuousOut[0] = (float) (muPitch + rng.nextGaussian() * stdPitch);
         continuousOut[1] = (float) (muYaw + rng.nextGaussian() * stdYaw);
 
         float logProbDiscreteAcc = 0.0f;
-
-        // 7 Binary discrete heads: logits [2..15]
         for (int k = 0; k < 7; k++) {
-            float[] probs = softmax(slice(logits, 2 + k * 2, 4 + k * 2));
-            discreteOut[k] = sample(probs);
-            logProbDiscreteAcc += (float) Math.log(probs[discreteOut[k]] + 1e-8f);
+            float[] logProbsDisc = logSoftmax(slice(logits, 2 + k * 2, 4 + k * 2));
+            discreteOut[k] = sampleFromLogProbs(logProbsDisc);
+            logProbDiscreteAcc += logProbsDisc[discreteOut[k]];
         }
 
         float logProbPitch = -0.5f * (float) Math.pow((continuousOut[0] - muPitch) / stdPitch, 2) - logStd[0] - 0.5f * (float) Math.log(2 * Math.PI);
@@ -105,7 +98,6 @@ public class PPOAgent {
         float[] returns = new float[N];
         float gae = 0.0f;
 
-        // 1. Generalized Advantage Estimation (GAE)
         for (int i = N - 1; i >= 0; i--) {
             StepData cur = memory.get(i);
             float nextVal = (i == N - 1 || cur.done) ? 0.0f : memory.get(i + 1).value;
@@ -115,7 +107,6 @@ public class PPOAgent {
             returns[i] = gae + cur.value;
         }
 
-        // 2. Batch Advantage Normalization
         float advMean = 0.0f, advStd = 0.0f;
         for (float a : advantages) advMean += a;
         advMean /= N;
@@ -126,7 +117,6 @@ public class PPOAgent {
             advantages[i] = (advantages[i] - advMean) / advStd;
         }
 
-        // 3. PPO Optimization Epochs
         for (int epoch = 0; epoch < 4; epoch++) {
             Matrix g_w1 = new Matrix(hiddenDim, stateDim);
             Matrix g_b1 = new Matrix(hiddenDim, 1);
@@ -154,85 +144,80 @@ public class PPOAgent {
                 float curLogProbYaw   = -0.5f * (float) Math.pow((data.yawDelta - muYaw) / stdYaw, 2) - logStd[1] - 0.5f * (float) Math.log(2 * Math.PI);
 
                 float curLogProbDisc = 0.0f;
-                float[][] probsDisc = new float[7][2];
+                float[][] logProbsDisc = new float[7][2];
                 for (int k = 0; k < 7; k++) {
-                    probsDisc[k] = softmax(slice(logits, 2 + k * 2, 4 + k * 2));
-                    curLogProbDisc += (float) Math.log(probsDisc[k][data.discreteActions[k]] + 1e-8f);
+                    logProbsDisc[k] = logSoftmax(slice(logits, 2 + k * 2, 4 + k * 2));
+                    curLogProbDisc += logProbsDisc[k][data.discreteActions[k]];
                 }
 
                 float curLogProb = curLogProbPitch + curLogProbYaw + curLogProbDisc;
                 float ratio = (float) Math.exp(curLogProb - data.logProb);
                 float adv = advantages[i];
 
-                // PPO Clipped Objective Gradient
                 float dL_dLogProb = ((ratio > 1f + clipEps && adv > 0) || (ratio < 1f - clipEps && adv < 0)) ? 0.0f : -adv * ratio;
 
-                // Logit Gradients (Actor)
                 float[] dL_dLogits = new float[actionDim];
 
-                // Continuous Pitch/Yaw Gradients through tanh
+                // Fixed continuous gradient using cached muPitch/muYaw
                 float dLogProb_dMuP = (data.pitchDelta - muPitch) / (stdPitch * stdPitch);
-                float dMuP_dZ0 = 1.0f - (float) Math.pow(Math.tanh(logits[0]), 2);
+                float dMuP_dZ0 = 1.0f - (muPitch * muPitch);
                 dL_dLogits[0] = dL_dLogProb * dLogProb_dMuP * dMuP_dZ0;
 
                 float dLogProb_dMuY = (data.yawDelta - muYaw) / (stdYaw * stdYaw);
-                float dMuY_dZ1 = 1.0f - (float) Math.pow(Math.tanh(logits[1]), 2);
+                float dMuY_dZ1 = 1.0f - (muYaw * muYaw);
                 dL_dLogits[1] = dL_dLogProb * dLogProb_dMuY * dMuY_dZ1;
 
-                // Accumulate logStd Gradients
                 g_logStd[0] += dL_dLogProb * ((float) Math.pow((data.pitchDelta - muPitch) / stdPitch, 2) - 1.0f);
                 g_logStd[1] += dL_dLogProb * ((float) Math.pow((data.yawDelta - muYaw) / stdYaw, 2) - 1.0f);
 
-                // Discrete Logit Gradients (Categorical Softmax + Entropy)
+                // Stable Log-Softmax categorical entropy gradients
                 for (int k = 0; k < 7; k++) {
                     int startIdx = 2 + k * 2;
                     int chosen = data.discreteActions[k];
+                    
+                    float entropy = 0.0f;
+                    for (int act = 0; act < 2; act++) {
+                        float pAct = (float) Math.exp(logProbsDisc[k][act]);
+                        entropy -= pAct * logProbsDisc[k][act];
+                    }
 
                     for (int act = 0; act < 2; act++) {
-                        float dLogProb_dLogit = (act == chosen ? 1.0f : 0.0f) - probsDisc[k][act];
-                        float dEnt_dLogit = -probsDisc[k][act] * ((float) Math.log(probsDisc[k][act] + 1e-8f) + 1.0f);
+                        float pAct = (float) Math.exp(logProbsDisc[k][act]);
+                        float dLogProb_dLogit = (act == chosen ? 1.0f : 0.0f) - pAct;
+                        float dEnt_dLogit = -pAct * (logProbsDisc[k][act] + entropy);
                         dL_dLogits[startIdx + act] = dL_dLogProb * dLogProb_dLogit - entropyCoeff * dEnt_dLogit;
                     }
                 }
 
-                // Value Loss Gradient (Critic)
-                float dL_dValue = valuePred - returns[i];
+                float dL_dValue = 0.5f * (valuePred - returns[i]);
 
-                // Backpropagate to Hidden Layer
                 float[] dL_dHidden = new float[hiddenDim];
                 for (int h = 0; h < hiddenDim; h++) {
                     float sum = 0.0f;
-                    for (int a = 0; a < actionDim; a++) {
-                        sum += wActor.data[a][h] * dL_dLogits[a];
-                    }
+                    for (int a = 0; a < actionDim; a++) sum += wActor.data[a][h] * dL_dLogits[a];
                     sum += wCritic.data[0][h] * dL_dValue;
-
-                    // ReLU Derivative
                     dL_dHidden[h] = (hiddenRaw[h] > 0) ? sum : 0.0f;
                 }
 
-                // Accumulate Batch Gradients
                 for (int a = 0; a < actionDim; a++) {
                     g_bA.data[a][0] += dL_dLogits[a] / N;
-                    for (int h = 0; h < hiddenDim; h++) {
-                        g_wA.data[a][h] += (dL_dLogits[a] * hidden[h]) / N;
-                    }
+                    for (int h = 0; h < hiddenDim; h++) g_wA.data[a][h] += (dL_dLogits[a] * hidden[h]) / N;
                 }
 
                 g_bC.data[0][0] += dL_dValue / N;
-                for (int h = 0; h < hiddenDim; h++) {
-                    g_wC.data[0][h] += (dL_dValue * hidden[h]) / N;
-                }
+                for (int h = 0; h < hiddenDim; h++) g_wC.data[0][h] += (dL_dValue * hidden[h]) / N;
 
                 for (int h = 0; h < hiddenDim; h++) {
                     g_b1.data[h][0] += dL_dHidden[h] / N;
-                    for (int s = 0; s < stateDim; s++) {
-                        g_w1.data[h][s] += (dL_dHidden[h] * data.state[s]) / N;
-                    }
+                    for (int s = 0; s < stateDim; s++) g_w1.data[h][s] += (dL_dHidden[h] * data.state[s]) / N;
                 }
             }
 
-            // 4. Perform Adam Updates for Network Weights
+            // Apply Gradient Clipping to stop numerical explosions
+            clipMatrixGradients(g_w1, 1.0f);
+            clipMatrixGradients(g_wA, 1.0f);
+            clipMatrixGradients(g_wC, 1.0f);
+
             w1.adamUpdate(g_w1, m_w1, v_w1, timeStep, lr, beta1, beta2, eps);
             b1.adamUpdate(g_b1, m_b1, v_b1, timeStep, lr, beta1, beta2, eps);
             wActor.adamUpdate(g_wA, m_wA, v_wA, timeStep, lr, beta1, beta2, eps);
@@ -240,7 +225,6 @@ public class PPOAgent {
             wCritic.adamUpdate(g_wC, m_wC, v_wC, timeStep, lr, beta1, beta2, eps);
             bCritic.adamUpdate(g_bC, m_bC, v_bC, timeStep, lr, beta1, beta2, eps);
 
-            // Update logStd via Adam
             for (int idx = 0; idx < 2; idx++) {
                 float g = g_logStd[idx] / N;
                 m_logStd[idx] = beta1 * m_logStd[idx] + (1.0f - beta1) * g;
@@ -248,8 +232,6 @@ public class PPOAgent {
                 float mHat = m_logStd[idx] / (1.0f - (float) Math.pow(beta1, timeStep));
                 float vHat = v_logStd[idx] / (1.0f - (float) Math.pow(beta2, timeStep));
                 logStd[idx] -= lr * mHat / ((float) Math.sqrt(vHat) + eps);
-                
-                // Clamp logStd to maintain stable exploration bounds
                 logStd[idx] = Math.max(-2.0f, Math.min(0.5f, logStd[idx]));
             }
         }
@@ -276,8 +258,18 @@ public class PPOAgent {
             readMatrix(dis, w1); readMatrix(dis, b1);
             readMatrix(dis, wActor); readMatrix(dis, bActor);
             readMatrix(dis, wCritic); readMatrix(dis, bCritic);
-            System.out.println("Loaded AI Brain with Adam state! Epoch step count: " + timeStep);
+            
+            resetAdamBuffers();
+            System.out.println("Loaded AI Brain with resynced Adam states! Epoch: " + timeStep);
         } catch (IOException e) { e.printStackTrace(); }
+    }
+
+    private void clipMatrixGradients(Matrix g, float maxVal) {
+        for (int i = 0; i < g.rows; i++) {
+            for (int j = 0; j < g.cols; j++) {
+                g.data[i][j] = Math.max(-maxVal, Math.min(maxVal, g.data[i][j]));
+            }
+        }
     }
 
     private void writeMatrix(DataOutputStream dos, Matrix m) throws IOException {
@@ -292,13 +284,29 @@ public class PPOAgent {
         }
     }
 
-    private int sample(float[] probs) {
-        float r = rng.nextFloat(), cumulative = 0.0f;
-        for (int i = 0; i < probs.length; i++) {
-            cumulative += probs[i];
+    private int sampleFromLogProbs(float[] logProbs) {
+        float r = rng.nextFloat();
+        float cumulative = 0.0f;
+        for (int i = 0; i < logProbs.length; i++) {
+            cumulative += (float) Math.exp(logProbs[i]);
             if (r <= cumulative) return i;
         }
-        return probs.length - 1;
+        return logProbs.length - 1;
+    }
+
+    private float[] logSoftmax(float[] in) {
+        float[] out = new float[in.length];
+        float max = Float.NEGATIVE_INFINITY;
+        for (float v : in) if (v > max) max = v;
+        
+        float sumExp = 0.0f;
+        for (float v : in) sumExp += (float) Math.exp(v - max);
+        float logSumExp = max + (float) Math.log(sumExp);
+
+        for (int i = 0; i < in.length; i++) {
+            out[i] = in[i] - logSumExp;
+        }
+        return out;
     }
 
     private float[] slice(float[] arr, int start, int end) {
@@ -319,15 +327,6 @@ public class PPOAgent {
     private float[] relu(float[] in) {
         float[] out = new float[in.length];
         for (int i = 0; i < in.length; i++) out[i] = Math.max(0, in[i]);
-        return out;
-    }
-
-    private float[] softmax(float[] in) {
-        float[] out = new float[in.length];
-        float max = Float.NEGATIVE_INFINITY, sum = 0.0f;
-        for (float v : in) if (v > max) max = v;
-        for (int i = 0; i < in.length; i++) { out[i] = (float) Math.exp(in[i] - max); sum += out[i]; }
-        for (int i = 0; i < in.length; i++) out[i] /= sum;
         return out;
     }
 }
