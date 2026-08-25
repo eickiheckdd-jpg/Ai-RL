@@ -39,10 +39,15 @@ public class RlHudOverlay implements HudRenderCallback {
         int width = 160;
         int height = 75;
 
-        // Semi-transparent dark container background (~56% opacity black)
+        // Semi-transparent dark container background
         drawContext.fill(x, y, x + width, y + height, 0x90000000);
-        // Border outline
-        drawContext.drawBorder(x, y, width, height, 0xFF333333);
+        
+        // Manual border rendering for 1.21.11 compatibility
+        int borderColor = 0xFF333333;
+        drawContext.fill(x, y, x + width, y + 1, borderColor); // Top
+        drawContext.fill(x, y + height - 1, x + width, y + height, borderColor); // Bottom
+        drawContext.fill(x, y, x + 1, y + height, borderColor); // Left
+        drawContext.fill(x + width - 1, y, x + width, y + height, borderColor); // Right
 
         // Header Title
         drawContext.drawText(textRenderer, "§b§lNEWGEN-6 PPO TELEMETRY", x + 6, y + 6, 0xFFFFFFFF, false);
