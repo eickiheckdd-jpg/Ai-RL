@@ -13,7 +13,7 @@ public class PPOEngine {
     private final float[] wCritic2 = new float[hiddenDim];
 
     private final Random rand = new Random();
-    public float stdev = 0.25f;
+    public float stdev = 0.1f;
 
     private float totalRewardTracker = 0.0f;
     private int trainingSteps = 0;
