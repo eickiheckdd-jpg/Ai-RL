@@ -31,15 +31,15 @@ public class StateEncoder {
         s[idx++] = self.isSprinting() ? 1f : 0f;
         s[idx++] = self.isSneaking() ? 1f : 0f;
         s[idx++] = clamp01(self.getAttackCooldownProgress(0f));
-        s[idx++] = (float) (self.getY() / 320.0); // rough world-height normalization
-        s[idx++] = clamp01(self.fallDistance / 20f);
+        s[idx++] = (float) (self.getY() / 320.0);
+        s[idx++] = clamp01((float) (self.fallDistance / 20.0));
         s[idx++] = self.isOnFire() ? 1f : 0f;
-        s[idx++] = 0f; // TODO: negative-status-effect flag (optional)
+        s[idx++] = 0f;
 
         // ---- target-relative info (14) ----
         boolean targetAlive = target != null && target.isAlive();
         if (targetAlive) {
-            Vec3d rel = target.getPos().subtract(self.getPos());
+            Vec3d rel = target.getPosition().subtract(self.getPosition());
             s[idx++] = (float) clampSym(rel.x, 32.0);
             s[idx++] = (float) clampSym(rel.y, 32.0);
             s[idx++] = (float) clampSym(rel.z, 32.0);
@@ -54,30 +54,29 @@ public class StateEncoder {
             s[idx++] = (float) clampSym(tv.x, 1.0);
             s[idx++] = (float) clampSym(tv.y, 1.0);
             s[idx++] = (float) clampSym(tv.z, 1.0);
-            s[idx++] = 1f; // target alive flag
+            s[idx++] = 1f;
             s[idx++] = target.isOnGround() ? 1f : 0f;
             s[idx++] = target.isSprinting() ? 1f : 0f;
-            s[idx++] = 0f; // reserved
+            s[idx++] = 0f;
         } else {
-            idx += 14; // leave zeros when no target is present/alive
+            idx += 14;
         }
 
         // ---- combat context (8) ----
-        double distance = targetAlive ? self.getPos().distanceTo(target.getPos()) : 999.0;
+        double distance = targetAlive ? self.getPosition().distanceTo(target.getPosition()) : 999.0;
         s[idx++] = (targetAlive && canSee(self, target)) ? 1f : 0f;
         s[idx++] = (targetAlive && distance <= 3.0) ? 1f : 0f;
         
-        // Combat Memory Fix: Normalizing hurtTime (0-10) to 0.0-1.0
         s[idx++] = self.hurtTime > 0 ? (self.hurtTime / 10f) : 0f; 
         s[idx++] = (targetAlive && target.hurtTime > 0) ? (target.hurtTime / 10f) : 0f; 
         
         s[idx++] = clamp01(self.getAttackCooldownProgress(0f));
         s[idx++] = !self.getMainHandStack().isEmpty() ? 1f : 0f;
-        s[idx++] = 0f; // Target blocking flag (optional)
+        s[idx++] = 0f;
         s[idx++] = self.isBlocking() ? 1f : 0f;
 
         // ---- local terrain grid, 6x6 (36) ----
-        World world = self.getWorld();
+        World world = self.getEntityWorld();
         BlockPos feet = self.getBlockPos();
         for (int dz = -TERRAIN_RADIUS; dz < TERRAIN_RADIUS; dz++) {
             for (int dx = -TERRAIN_RADIUS; dx < TERRAIN_RADIUS; dx++) {
@@ -91,9 +90,9 @@ public class StateEncoder {
         int aheadDz = (int) Math.round(Math.cos(Math.toRadians(self.getYaw())));
         BlockPos ahead = feet.add(aheadDx, 0, aheadDz);
         
-        s[idx++] = getRelativeHeight(world, ahead) > 0f ? 1f : 0f; // 1 = wall directly ahead
+        s[idx++] = getRelativeHeight(world, ahead) > 0f ? 1f : 0f;
         s[idx++] = isLedge(world, feet) ? 1f : 0f;
-        s[idx++] = clamp01((self.age % 1200) / 1200f); // coarse cyclical time-alive signal
+        s[idx++] = clamp01((self.age % 1200) / 1200f);
         s[idx++] = clamp01(world.getLightLevel(feet) / 15f);
 
         if (idx != SIZE) {
@@ -103,15 +102,12 @@ public class StateEncoder {
     }
 
     private static float getRelativeHeight(World world, BlockPos targetColumn) {
-        // Scan from 3 blocks above the target down to 3 blocks below it.
         for (int y = 3; y >= -3; y--) {
             BlockPos check = targetColumn.up(y);
             if (world.getBlockState(check).isSolidBlock(world, check)) {
-                // Returns a normalized float: 1.0 (high wall) down to -1.0 (deep hole)
                 return (float) y / 3.0f; 
             }
         }
-        // If we scanned down 3 blocks and found no floor, it's a dangerous drop.
         return -1.0f; 
     }
 
@@ -146,4 +142,3 @@ public class StateEncoder {
         return wrapDegrees(b - a);
     }
 }
-
