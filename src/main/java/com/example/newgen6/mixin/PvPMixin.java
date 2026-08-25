@@ -110,16 +110,28 @@ public abstract class PvPMixin {
         float cd = p.getAttackCooldownProgress(0.0f);
         double dist = p.distanceTo(t);
 
-        if (dist >= 2.3 && dist <= 3.0) r += 0.1f;
+        // 1. Crosshair Alignment (State[3] is dot product of look vector -> target)
+        Vec3d toT = t.getEyePos().subtract(p.getEyePos()).normalize();
+        double lookAlignment = p.getRotationVector().dotProduct(toT);
+        if (lookAlignment > 0.85) r += 0.05f; 
 
+        // 2. Click Handling
         if (clicked) {
-            if (cd < 0.9f) r -= 0.6f;             
-            else if (t.hurtTime > 0) r -= 0.8f;   
-            else if (dist <= 3.0f) r += 2.0f;     
+            if (dist > 3.2f) {
+                r -= 1.0f; // Penalty for swinging at air (whiffing)
+            } else if (cd < 0.85f) {
+                r -= 0.5f; // Penalty for spam clicking on cooldown
+            } else if (t.hurtTime > 0) {
+                r -= 0.3f; // Penalty for hitting during immunity frames
+            } else {
+                r += 1.0f; // Good attack attempt!
+            }
         }
-        
-        if (t.hurtTime == 10) r += 10.0f;         
-        if (p.hurtTime == 10) r -= 5.0f;          
+
+        // 3. Impact Rewards (When damage is actually dealt/taken)
+        if (t.hurtTime == 10) r += 15.0f; // Big reward for actually dealing damage
+        if (p.hurtTime == 10) r -= 8.0f;  // Penalty for taking damage
+
         return r;
     }
 }
