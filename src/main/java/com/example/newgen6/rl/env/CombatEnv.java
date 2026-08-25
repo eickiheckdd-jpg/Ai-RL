@@ -85,8 +85,8 @@ public final class CombatEnv {
         obsOut[ObservationSchema.SELF_IS_AIRBORNE] = self.isOnGround() ? 0f : 1f;
         obsOut[ObservationSchema.SELF_IS_SPRINTING] = self.isSprinting() ? 1f : 0f;
         obsOut[ObservationSchema.SELF_IS_SNEAKING] = self.isSneaking() ? 1f : 0f;
-        obsOut[ObservationSchema.SELF_IS_JUMPING] = (self.input != null && self.input.jumping) ? 1f : 0f;
-        obsOut[ObservationSchema.SELF_FALL_DISTANCE_NORM] = (float) clamp01(self.fallDistance / 20f);
+        obsOut[ObservationSchema.SELF_IS_JUMPING] = (self.input != null && self.input.playerInput != null && self.input.playerInput.jump()) ? 1f : 0f;
+        obsOut[ObservationSchema.SELF_FALL_DISTANCE_NORM] = clamp01((float) self.fallDistance / 20f);
         obsOut[ObservationSchema.SELF_ATTACK_COOLDOWN_PROGRESS] = clamp01(self.getAttackCooldownProgress(0f));
         obsOut[ObservationSchema.SELF_HAS_SWORD] = isSword(self) ? 1f : 0f;
         obsOut[ObservationSchema.SELF_HAS_SHIELD_RAISED] = self.isBlocking() ? 1f : 0f;
