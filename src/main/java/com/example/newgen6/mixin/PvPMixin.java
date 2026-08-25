@@ -105,37 +105,36 @@ public abstract class PvPMixin {
     }
 
     @Unique
-private float calculateReward(ClientPlayerEntity p, PlayerEntity t, boolean clicked) {
-    float r = 0.0f;
-    float cd = p.getAttackCooldownProgress(0.0f);
-    double dist = p.distanceTo(t);
+    private float calculateReward(ClientPlayerEntity p, PlayerEntity t, boolean clicked) {
+        float r = 0.0f;
+        float cd = p.getAttackCooldownProgress(0.0f);
+        double dist = p.distanceTo(t);
 
-    // 1. Crosshair Alignment 
-    Vec3d toT = t.getEyePos().subtract(p.getEyePos()).normalize();
-    double lookAlignment = p.getRotationVector().dotProduct(toT);
-    
-    if (lookAlignment > 0.85) r += 0.05f; 
+        // 1. Crosshair Alignment 
+        Vec3d toT = t.getEyePos().subtract(p.getEyePos()).normalize();
+        double lookAlignment = p.getRotationVector().dotProduct(toT);
+        
+        if (lookAlignment > 0.85) r += 0.05f; 
 
-    // 2. Click Handling (Patched Exploit)
-    if (clicked) {
-        if (dist > 3.2f) {
-            r -= 1.0f; // Penalty for swinging out of range
-        } else if (lookAlignment < 0.85) {
-            r -= 1.0f; // NEW: Penalty for swinging while looking at the sky/floor!
-        } else if (cd < 0.85f) {
-            r -= 0.5f; // Penalty for spam clicking on cooldown
-        } else if (t.hurtTime > 0) {
-            r -= 0.3f; // Penalty for hitting during immunity frames
-        } else {
-            r += 1.0f; // Good attack attempt (Close AND Aiming properly!)
+        // 2. Click Handling (Patched Exploit)
+        if (clicked) {
+            if (dist > 3.2f) {
+                r -= 1.0f; // Penalty for swinging out of range
+            } else if (lookAlignment < 0.85) {
+                r -= 1.0f; // Penalty for swinging while looking at the sky/floor
+            } else if (cd < 0.85f) {
+                r -= 0.5f; // Penalty for spam clicking on cooldown
+            } else if (t.hurtTime > 0) {
+                r -= 0.3f; // Penalty for hitting during immunity frames
+            } else {
+                r += 1.0f; // Good attack attempt (Close AND Aiming properly)
+            }
         }
+
+        // 3. Impact Rewards
+        if (t.hurtTime == 10) r += 15.0f; 
+        if (p.hurtTime == 10) r -= 8.0f;  
+
+        return r;
     }
-
-    // 3. Impact Rewards
-    // (Note: If the enemy takes fall damage, the AI might still get a random +15 here, 
-    // but the sky-swinging exploit is now completely fixed).
-    if (t.hurtTime == 10) r += 15.0f; 
-    if (p.hurtTime == 10) r -= 8.0f;  
-
-    return r;
 }
