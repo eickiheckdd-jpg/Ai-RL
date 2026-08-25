@@ -38,7 +38,7 @@ public class RewardCalculator {
         }
 
         if (targetAlive) {
-            Vec3d rel = target.getPosition().subtract(self.getPosition());
+            Vec3d rel = target.getPos().subtract(self.getPos());
             double desiredYaw = Math.toDegrees(Math.atan2(-rel.x, rel.z));
             float yawDiff = Math.abs(wrapDegrees(self.getYaw() - (float) desiredYaw));
             
