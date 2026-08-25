@@ -39,7 +39,7 @@ public class StateEncoder {
         // ---- target-relative info (14) ----
         boolean targetAlive = target != null && target.isAlive();
         if (targetAlive) {
-            Vec3d rel = target.getPosition().subtract(self.getPosition());
+            Vec3d rel = target.getPos().subtract(self.getPos());
             s[idx++] = (float) clampSym(rel.x, 32.0);
             s[idx++] = (float) clampSym(rel.y, 32.0);
             s[idx++] = (float) clampSym(rel.z, 32.0);
@@ -63,7 +63,7 @@ public class StateEncoder {
         }
 
         // ---- combat context (8) ----
-        double distance = targetAlive ? self.getPosition().distanceTo(target.getPosition()) : 999.0;
+        double distance = targetAlive ? self.getPos().distanceTo(target.getPos()) : 999.0;
         s[idx++] = (targetAlive && canSee(self, target)) ? 1f : 0f;
         s[idx++] = (targetAlive && distance <= 3.0) ? 1f : 0f;
         
