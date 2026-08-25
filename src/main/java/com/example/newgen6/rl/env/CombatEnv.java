@@ -3,33 +3,14 @@ package com.example.newgen6.rl.env;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.LivingEntity;
-import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.Vec3d;
 
-/**
- * Collects one tick's float[229] observation from REAL client-visible game
- * state (spec section 23: no fake combat simulator - Minecraft determines
- * the result, the AI only chooses actions).
- *
- * IMPORTANT MAPPINGS NOTE FOR THE HUMAN REVIEWER / GEMINI AUDIT:
- * This file targets Yarn-style method names that have been stable across
- * recent 1.21.x releases (getHealth, getMaxHealth, getVelocity, getYaw,
- * getPitch, isOnGround, isSprinting, isSneaking, getAttackCooldownProgress,
- * squaredDistanceTo, raycast via world.raycast). Because no actual mapped
- * project sources were available while generating this file (no working
- * build.gradle/mappings were attached to the request), EVERY method call
- * below must be checked against your real 1.21.11 mappings before this
- * compiles. Do not assume these names are 100% correct without verifying -
- * that verification step could not be performed here without network/build
- * access to your actual project.
- */
 public final class CombatEnv {
 
     private LivingEntity currentOpponent;
-    private int opponentTier = 1; // 0=low,1=average,2=high - set by training harness
+    private int opponentTier = 1;
 
-    // Rolling combat-state trackers (updated by event hooks in PvPMixin / this class).
     private int ticksSinceOwnAttack = 999;
     private int ticksSinceHitLanded = 999;
     private int ticksSinceDamageTaken = 999;
@@ -39,7 +20,6 @@ public final class CombatEnv {
     private boolean lastAttackMissed = false;
     private int ticksThisEpisode = 0;
 
-    // Previous-tick action memory, fed back in as observation features (spec section 12).
     private int prevMoveAction = ActionSpace.MOVE_HOLD;
     private boolean prevJump, prevSprint, prevSneak, prevAttack;
     private float prevYawDeltaDeg, prevPitchDeltaDeg;
@@ -47,7 +27,6 @@ public final class CombatEnv {
     public void setOpponent(LivingEntity opponent) { this.currentOpponent = opponent; }
     public void setOpponentTier(int tier) { this.opponentTier = tier; }
 
-    /** Notify the env that this tick's chosen action has resolved, for next-tick's "previous action" features. */
     public void recordAction(int moveAction, boolean jump, boolean sprint, boolean sneak, boolean attack,
                               float yawDeltaDeg, float pitchDeltaDeg) {
         prevMoveAction = moveAction; prevJump = jump; prevSprint = sprint; prevSneak = sneak; prevAttack = attack;
@@ -65,12 +44,10 @@ public final class CombatEnv {
         ticksSinceDamageTaken = 0;
     }
 
-    /** Advances per-tick counters; call once per tick before collect(). */
     public void tickCounters() {
         ticksThisEpisode++;
         ticksSinceHitLanded = Math.min(999, ticksSinceHitLanded + 1);
         ticksSinceDamageTaken = Math.min(999, ticksSinceDamageTaken + 1);
-        // simple decay window for "recent" damage accumulators (~20 ticks / 1s)
         recentDamageDealt *= 0.95f;
         recentDamageReceived *= 0.95f;
     }
@@ -81,11 +58,6 @@ public final class CombatEnv {
         recentDamageDealt = recentDamageReceived = 0f;
     }
 
-    /**
-     * Fills obsOut[0..228] for the current tick. obsOut must be length
-     * ObservationSchema.OBSERVATION_SIZE; reused across ticks to avoid
-     * per-tick allocation churn.
-     */
     public void collect(float[] obsOut) {
         MinecraftClient mc = MinecraftClient.getInstance();
         ClientPlayerEntity self = mc.player;
@@ -93,7 +65,6 @@ public final class CombatEnv {
 
         java.util.Arrays.fill(obsOut, 0f);
 
-        // ---- SELF ----
         obsOut[ObservationSchema.SELF_HEALTH_FRACTION] = clamp01(self.getHealth() / Math.max(1f, self.getMaxHealth()));
         obsOut[ObservationSchema.SELF_ABSORPTION_FRACTION] = clamp01(self.getAbsorptionAmount() / Math.max(1f, self.getMaxHealth()));
         Vec3d vel = self.getVelocity();
@@ -113,8 +84,8 @@ public final class CombatEnv {
         obsOut[ObservationSchema.SELF_IS_AIRBORNE] = self.isOnGround() ? 0f : 1f;
         obsOut[ObservationSchema.SELF_IS_SPRINTING] = self.isSprinting() ? 1f : 0f;
         obsOut[ObservationSchema.SELF_IS_SNEAKING] = self.isSneaking() ? 1f : 0f;
-        obsOut[ObservationSchema.SELF_IS_JUMPING] = self.jumping ? 1f : 0f;
-        obsOut[ObservationSchema.SELF_FALL_DISTANCE_NORM] = clamp01(self.fallDistance / 20f);
+        obsOut[ObservationSchema.SELF_IS_JUMPING] = (self.input != null && self.input.jumping) ? 1f : 0f;
+        obsOut[ObservationSchema.SELF_FALL_DISTANCE_NORM] = (float) clamp01(self.fallDistance / 20f);
         obsOut[ObservationSchema.SELF_ATTACK_COOLDOWN_PROGRESS] = clamp01(self.getAttackCooldownProgress(0f));
         obsOut[ObservationSchema.SELF_HAS_SWORD] = isSword(self) ? 1f : 0f;
         obsOut[ObservationSchema.SELF_HAS_SHIELD_RAISED] = self.isBlocking() ? 1f : 0f;
@@ -123,10 +94,11 @@ public final class CombatEnv {
         obsOut[ObservationSchema.SELF_IS_IN_WATER] = self.isTouchingWater() ? 1f : 0f;
         obsOut[ObservationSchema.SELF_TICKS_EXISTED_PHASE] = (self.age % 20) / 20f;
 
-        // ---- OPPONENT ----
         if (currentOpponent != null && currentOpponent.isAlive()) {
             obsOut[ObservationSchema.OPP_PRESENT] = 1f;
-            Vec3d d = currentOpponent.getPos().subtract(self.getPos());
+            Vec3d oppPos = new Vec3d(currentOpponent.getX(), currentOpponent.getY(), currentOpponent.getZ());
+            Vec3d selfPos = new Vec3d(self.getX(), self.getY(), self.getZ());
+            Vec3d d = oppPos.subtract(selfPos);
             obsOut[ObservationSchema.OPP_REL_X] = clampSigned((float) d.x / ObservationSchema.MAX_RANGE);
             obsOut[ObservationSchema.OPP_REL_Y] = clampSigned((float) d.y / ObservationSchema.MAX_RANGE);
             obsOut[ObservationSchema.OPP_REL_Z] = clampSigned((float) d.z / ObservationSchema.MAX_RANGE);
@@ -134,12 +106,12 @@ public final class CombatEnv {
             obsOut[ObservationSchema.OPP_REL_VEL_X] = clampSigned((float) relVel.x / ObservationSchema.MAX_SPEED);
             obsOut[ObservationSchema.OPP_REL_VEL_Y] = clampSigned((float) relVel.y / ObservationSchema.MAX_SPEED);
             obsOut[ObservationSchema.OPP_REL_VEL_Z] = clampSigned((float) relVel.z / ObservationSchema.MAX_SPEED);
-            double dist = self.getPos().distanceTo(currentOpponent.getPos());
+            double dist = selfPos.distanceTo(oppPos);
             double horizDist = Math.sqrt(d.x * d.x + d.z * d.z);
             obsOut[ObservationSchema.OPP_DISTANCE_NORM] = clamp01((float) (dist / ObservationSchema.MAX_RANGE));
             obsOut[ObservationSchema.OPP_HORIZ_DISTANCE_NORM] = clamp01((float) (horizDist / ObservationSchema.MAX_RANGE));
 
-            double bearing = Math.atan2(-d.x, d.z); // matches MC yaw convention (0 = +Z)
+            double bearing = Math.atan2(-d.x, d.z); 
             obsOut[ObservationSchema.OPP_REL_YAW_SIN] = (float) Math.sin(bearing);
             obsOut[ObservationSchema.OPP_REL_YAW_COS] = (float) Math.cos(bearing);
             double elevation = Math.atan2(-d.y, horizDist);
@@ -171,7 +143,6 @@ public final class CombatEnv {
                 (Math.abs(yawErr) < Math.toRadians(5) && Math.abs(pitchErr) < Math.toRadians(5)) ? 1f : 0f;
         }
 
-        // ---- COMBAT STATE ----
         obsOut[ObservationSchema.COMBAT_TIME_SINCE_ATTACK_NORM] = clamp01(ticksSinceOwnAttack / 40f);
         obsOut[ObservationSchema.COMBAT_TIME_SINCE_HIT_LANDED_NORM] = clamp01(ticksSinceHitLanded / 100f);
         obsOut[ObservationSchema.COMBAT_TIME_SINCE_DAMAGE_TAKEN_NORM] = clamp01(ticksSinceDamageTaken / 100f);
@@ -182,17 +153,9 @@ public final class CombatEnv {
         obsOut[ObservationSchema.COMBAT_IS_IN_COMBAT] = (ticksSinceDamageTaken < 100 || ticksSinceHitLanded < 100) ? 1f : 0f;
         obsOut[ObservationSchema.COMBAT_CRIT_AVAILABLE] = (!self.isOnGround() && vel.y < 0) ? 1f : 0f;
 
-        // ---- SPATIAL / VISION: 16 dirs x 5 bands raycast ----
         fillSpatialRaycasts(self, obsOut);
-
-        // ---- TARGET RELATIONSHIP (camera-relative; reuses opponent bearing/elevation w/ camera yaw/pitch) ----
-        if (currentOpponent != null && currentOpponent.isAlive()) {
-            // camera yaw/pitch == self yaw/pitch for a first-person client player.
-            double yawErr = obsOut[ObservationSchema.OPP_YAW_ERROR_SIN]; // reuse computed values below via re-derivation
-        }
         fillTargetBlock(self, obsOut);
 
-        // ---- PREV ACTION ----
         int base = ObservationSchema.PREV_MOVE_ONEHOT_START;
         if (prevMoveAction >= 0 && prevMoveAction < ActionSpace.MOVE_ACTIONS) obsOut[base + prevMoveAction] = 1f;
         obsOut[ObservationSchema.PREV_JUMP] = prevJump ? 1f : 0f;
@@ -206,13 +169,12 @@ public final class CombatEnv {
         obsOut[ObservationSchema.PREV_PITCH_ACTION_SIN] = (float) Math.sin(prevPitchRad);
         obsOut[ObservationSchema.PREV_PITCH_ACTION_COS] = (float) Math.cos(prevPitchRad);
 
-        // ---- META ----
         obsOut[ObservationSchema.META_EPISODE_TIME_NORM] = clamp01(ticksThisEpisode / 1200f);
         obsOut[ObservationSchema.META_OPPONENT_TIER_LOW] = opponentTier == 0 ? 1f : 0f;
         obsOut[ObservationSchema.META_OPPONENT_TIER_AVERAGE] = opponentTier == 1 ? 1f : 0f;
         obsOut[ObservationSchema.META_OPPONENT_TIER_HIGH] = opponentTier == 2 ? 1f : 0f;
-        if (self.getWorld() != null) {
-            long t = self.getWorld().getTimeOfDay() % 24000;
+        if (self.getEntityWorld() != null) {
+            long t = self.getEntityWorld().getTimeOfDay() % 24000;
             double phase = 2 * Math.PI * t / 24000.0;
             obsOut[ObservationSchema.META_TIME_OF_DAY_SIN] = (float) Math.sin(phase);
             obsOut[ObservationSchema.META_TIME_OF_DAY_COS] = (float) Math.cos(phase);
@@ -221,7 +183,8 @@ public final class CombatEnv {
 
     private void fillTargetBlock(ClientPlayerEntity self, float[] obsOut) {
         if (currentOpponent == null || !currentOpponent.isAlive()) return;
-        Vec3d d = currentOpponent.getPos().add(0, currentOpponent.getStandingEyeHeight() * 0.5, 0)
+        Vec3d oppPos = new Vec3d(currentOpponent.getX(), currentOpponent.getY(), currentOpponent.getZ());
+        Vec3d d = oppPos.add(0, currentOpponent.getStandingEyeHeight() * 0.5, 0)
                                    .subtract(self.getEyePos());
         double dist = d.length();
         double horiz = Math.sqrt(d.x * d.x + d.z * d.z);
@@ -242,8 +205,7 @@ public final class CombatEnv {
         double closing = -(d.normalize().dotProduct(oppVel.subtract(self.getVelocity())));
         obsOut[ObservationSchema.TARGET_CLOSING_SPEED_NORM] = clampSigned((float) (closing / ObservationSchema.MAX_SPEED));
 
-        // simple 2-tick linear position prediction
-        Vec3d predicted = currentOpponent.getPos().add(oppVel.multiply(2));
+        Vec3d predicted = oppPos.add(oppVel.multiply(2));
         Vec3d dp = predicted.subtract(self.getEyePos());
         double horizP = Math.sqrt(dp.x * dp.x + dp.z * dp.z);
         double bearingP = normalizeAngle(Math.atan2(-dp.x, dp.z) - Math.toRadians(self.getYaw()));
@@ -254,11 +216,10 @@ public final class CombatEnv {
         obsOut[ObservationSchema.TARGET_PREDICTED_ELEVATION_COS] = (float) Math.cos(elevationP);
     }
 
-    /** Lightweight 16-direction x 5-band raycast grid - the compact "vision" sensor from spec section 12. */
     private void fillSpatialRaycasts(ClientPlayerEntity self, float[] obsOut) {
-        if (self.getWorld() == null) return;
+        if (self.getEntityWorld() == null) return;
         Vec3d origin = self.getEyePos();
-        double[] verticalOffsets = {-1.2, -0.4, 0.0, 0.6, 1.2}; // feet, waist, eye, above, sky bands
+        double[] verticalOffsets = {-1.2, -0.4, 0.0, 0.6, 1.2}; 
 
         for (int dir = 0; dir < ObservationSchema.SPATIAL_RAYCAST_DIRS; dir++) {
             double angle = 2 * Math.PI * dir / ObservationSchema.SPATIAL_RAYCAST_DIRS;
@@ -266,15 +227,13 @@ public final class CombatEnv {
             for (int band = 0; band < ObservationSchema.SPATIAL_RAYCAST_BANDS; band++) {
                 Vec3d from = origin.add(0, verticalOffsets[band], 0);
                 Vec3d to = from.add(dx * ObservationSchema.MAX_RANGE, 0, dz * ObservationSchema.MAX_RANGE);
-                // NOTE: verify World#raycast / RaycastContext constructor signature against your 1.21.11 mappings.
-                net.minecraft.util.math.BlockPos hitOrMax = null;
-                float normalizedDist = 1.0f; // default: clear to MAX_RANGE
+                float normalizedDist = 1.0f; 
                 var ctx = new net.minecraft.world.RaycastContext(
                     from, to,
                     net.minecraft.world.RaycastContext.ShapeType.COLLIDER,
                     net.minecraft.world.RaycastContext.FluidHandling.NONE,
                     self);
-                HitResult result = self.getWorld().raycast(ctx);
+                HitResult result = self.getEntityWorld().raycast(ctx);
                 if (result != null && result.getType() == HitResult.Type.BLOCK) {
                     double d = result.getPos().distanceTo(from);
                     normalizedDist = clamp01((float) (d / ObservationSchema.MAX_RANGE));
@@ -285,7 +244,7 @@ public final class CombatEnv {
     }
 
     private boolean hasLineOfSight(ClientPlayerEntity self, LivingEntity target) {
-        if (self.getWorld() == null) return false;
+        if (self.getEntityWorld() == null) return false;
         HitResult result = net.minecraft.entity.projectile.ProjectileUtil.raycast(
             self, self.getEyePos(), target.getEyePos(), target.getBoundingBox().expand(0.3),
             (e) -> !e.isSpectator(), (float) self.getEyePos().distanceTo(target.getEyePos()));
