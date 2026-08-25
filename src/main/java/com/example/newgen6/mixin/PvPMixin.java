@@ -19,14 +19,30 @@ public abstract class PvPMixin {
         AiControlState.PendingInput pending = AiControlState.consumePendingMovementInput();
         if (pending == null) return;
 
+        // Sanitize inputs to ensure mutually exclusive directional flags 
+        // and prevent server-side network protocol or sanity check errors.
+        boolean forward = pending.forward > 0f;
+        boolean backward = pending.forward < 0f;
+        if (forward && backward) {
+            forward = false;
+            backward = false;
+        }
+
+        boolean left = pending.sideways > 0f;
+        boolean right = pending.sideways < 0f;
+        if (left && right) {
+            left = false;
+            right = false;
+        }
+
         self.playerInput = new PlayerInput(
-            pending.forward > 0f,   // forward
-            pending.forward < 0f,   // backward
-            pending.sideways > 0f,  // left
-            pending.sideways < 0f,  // right
-            pending.jump,           // jump
-            pending.sneak,          // sneak
-            false                   // sprint
+            forward,
+            backward,
+            left,
+            right,
+            pending.jump,
+            pending.sneak,
+            false // sprint
         );
     }
 }
