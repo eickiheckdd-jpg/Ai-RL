@@ -21,22 +21,8 @@ import net.minecraft.entity.LivingEntity;
 
 import java.util.Random;
 
-/**
- * Client entrypoint (matches fabric.mod.json's declared entrypoint exactly:
- * com.example.newgen6.NewGen6RLMod). Wires the whole pipeline together every
- * tick:
- *
- *   CombatEnv.collect() -> float[229]
- *        -> PolicyValueNetwork.forward(obs, h_prev) -> action distributions + value
- *        -> sample action (stochastic during training, argmax if evaluating)
- *        -> AiControlState / AiInputApplier -> Minecraft's normal input path
- *        -> RolloutBuffer.add(...)
- *        -> when the buffer fills: PPOTrainer.update(...)
- */
 public final class NewGen6RLMod implements ClientModInitializer {
 
-    // Random source for weight init AND action sampling. NOT seeded from any
-    // pretrained/external source - spec section 7 (start from scratch).
     private final Random rng = new Random();
 
     private PolicyValueNetwork network;
@@ -48,17 +34,17 @@ public final class NewGen6RLMod implements ClientModInitializer {
     private float[] hiddenState;
     private final float[] obsScratch = new float[ObservationSchema.OBSERVATION_SIZE];
 
-    public static final int ROLLOUT_CAPACITY = 2048; // ticks (~102s of gameplay at 20tps)
+    public static final int ROLLOUT_CAPACITY = 2048;
 
-    // last-tick bookkeeping for reward computation
     private float lastHealth = -1f;
     private float lastOpponentHealth = -1f;
 
     @Override
     public void onInitializeClient() {
-        ObservationSchema.validate(); // fail loudly at boot if the 229-feature ABI is ever broken
+        ObservationSchema.validate(); 
 
-        network = new PolicyValueNetwork(rng); // random init only, no pretrained weights
+        // FIX: Passed obsSize (229) and hiddenSize (128) to constructor
+        network = new PolicyValueNetwork(ObservationSchema.OBSERVATION_SIZE, 128, rng); 
         optimizer = new AdamOptimizer(3e-4f);
         network.registerWith(optimizer);
         trainer = new PPOTrainer(network, optimizer, rng);
@@ -83,15 +69,14 @@ public final class NewGen6RLMod implements ClientModInitializer {
         LivingEntity opponent = findOpponent(mc, player);
         env.setOpponent(opponent);
 
-        // 1) Observe (one tick == float[229], see ObservationSchema).
         env.collect(obsScratch);
         float[] hPrev = hiddenState.clone();
 
-        // 2) Policy forward pass (h_prev encodes the recurrent ~200-tick context).
         PolicyValueNetwork.Output out = network.forward(obsScratch, hPrev, null);
-        hiddenState = out.h;
+        
+        // FIX: Replaced out.h with out.hiddenOut to match your network class
+        hiddenState = out.hiddenOut;
 
-        // 3) Sample the factorized action (stochastic - this is training, not eval).
         int move = Categorical.sample(out.moveLogits, rng);
         int yaw = Categorical.sample(out.yawLogits, rng);
         int pitch = Categorical.sample(out.pitchLogits, rng);
@@ -102,7 +87,6 @@ public final class NewGen6RLMod implements ClientModInitializer {
 
         double logProb = com.example.newgen6.rl.ppo.PPOMath.jointLogProb(out, move, yaw, pitch, jump, sprint, sneak, attack);
 
-        // 4) Apply the action through Minecraft's NORMAL input path (no teleport/god-mode - spec 21/23).
         AiControlState.setPendingMovementInput(new AiControlState.PendingInput(
             ActionSpace.moveForwardComponent(move), ActionSpace.moveStrafeComponent(move),
             jump == 1, sneak == 1));
@@ -116,7 +100,6 @@ public final class NewGen6RLMod implements ClientModInitializer {
 
         CombatHud.publish(out.yawLogits, out.pitchLogits, hiddenState, moveLabel(move));
 
-        // 5) Reward from REAL resulting state deltas (health changes since last tick).
         float currentHealth = player.getHealth();
         float damageTaken = lastHealth >= 0 ? Math.max(0, lastHealth - currentHealth) : 0f;
         float opponentHealth = opponent != null ? opponent.getHealth() : 0f;
@@ -134,18 +117,18 @@ public final class NewGen6RLMod implements ClientModInitializer {
 
         boolean episodeDone = died || killed;
 
-        // 6) Store the transition.
+        // FIX: Explicitly cast logProb and out.value to (float)
         rolloutBuffer.add(obsScratch, hPrev, move, yaw, pitch, jump, sprint, sneak, attack,
-            logProb, out.value, reward, episodeDone);
+            (float) logProb, (float) out.value, reward, episodeDone);
 
         if (episodeDone) {
             env.resetEpisode();
-            hiddenState = network.initialHiddenState(); // reset recurrent context at episode boundaries
+            hiddenState = network.initialHiddenState(); 
         }
 
-        // 7) Train once the rollout buffer is full.
         if (rolloutBuffer.isFull()) {
-            float bootstrapValue = episodeDone ? 0f : out.value;
+            // FIX: Explicit cast out.value to (float)
+            float bootstrapValue = episodeDone ? 0f : (float) out.value;
             lastStats = trainer.update(rolloutBuffer, bootstrapValue);
             rolloutBuffer.clear();
         }
