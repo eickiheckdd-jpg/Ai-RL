@@ -5,6 +5,7 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.Vec3d;
+import net.minecraft.world.RaycastContext;
 
 public final class CombatEnv {
 
@@ -228,10 +229,10 @@ public final class CombatEnv {
                 Vec3d from = origin.add(0, verticalOffsets[band], 0);
                 Vec3d to = from.add(dx * ObservationSchema.MAX_RANGE, 0, dz * ObservationSchema.MAX_RANGE);
                 float normalizedDist = 1.0f; 
-                var ctx = new net.minecraft.world.RaycastContext(
+                var ctx = new RaycastContext(
                     from, to,
-                    net.minecraft.world.RaycastContext.ShapeType.COLLIDER,
-                    net.minecraft.world.RaycastContext.FluidHandling.NONE,
+                    RaycastContext.ShapeType.COLLIDER,
+                    RaycastContext.FluidHandling.NONE,
                     self);
                 HitResult result = self.getEntityWorld().raycast(ctx);
                 if (result != null && result.getType() == HitResult.Type.BLOCK) {
@@ -245,10 +246,14 @@ public final class CombatEnv {
 
     private boolean hasLineOfSight(ClientPlayerEntity self, LivingEntity target) {
         if (self.getEntityWorld() == null) return false;
-        HitResult result = net.minecraft.entity.projectile.ProjectileUtil.raycast(
-            self, self.getEyePos(), target.getEyePos(), target.getBoundingBox().expand(0.3),
-            (e) -> !e.isSpectator(), (float) self.getEyePos().distanceTo(target.getEyePos()));
-        return result == null || result.getType() != HitResult.Type.BLOCK;
+        var ctx = new RaycastContext(
+            self.getEyePos(), target.getEyePos(),
+            RaycastContext.ShapeType.COLLIDER,
+            RaycastContext.FluidHandling.NONE,
+            self
+        );
+        HitResult result = self.getEntityWorld().raycast(ctx);
+        return result.getType() == HitResult.Type.MISS;
     }
 
     private boolean isSword(ClientPlayerEntity self) {
