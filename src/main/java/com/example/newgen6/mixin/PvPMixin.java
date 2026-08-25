@@ -1,6 +1,7 @@
 package com.example.newgen6.mixin;
 
 import com.example.newgen6.NewGen6RLMod;
+import com.example.newgen6.hud.RlHudOverlay;
 import com.example.newgen6.rl.env.ActionSpace;
 import com.example.newgen6.rl.env.RewardCalculator;
 import com.example.newgen6.rl.env.StateEncoder;
@@ -48,6 +49,9 @@ public class PvPMixin {
             TrajectoryBuffer buffer = NewGen6RLMod.getBuffer();
             buffer.add(pendingState, pendingActions, reward, pendingValue, pendingLogProb, done);
 
+            // Send real-time reward to HUD
+            RlHudOverlay.lastReward = reward;
+
             if (buffer.isFull()) {
                 float bootstrapValue = (self.isAlive() && target != null)
                         ? NewGen6RLMod.getNetwork().act(stateEncoder.encode(self, target)).value
@@ -68,6 +72,12 @@ public class PvPMixin {
         ActorCriticNetwork.StepResult step = network.act(state);
 
         applyAction(client, self, target, step.actions);
+
+        // Feed telemetry data to HUD
+        RlHudOverlay.lastValue = step.value;
+        RlHudOverlay.lastLogProb = step.logProb;
+        RlHudOverlay.lastActionSummary = String.format("M:%d J:%d Y:%d P:%d A:%d", 
+            step.actions[0], step.actions[1], step.actions[2], step.actions[3], step.actions[4]);
 
         pendingState = state;
         pendingActions = step.actions;
