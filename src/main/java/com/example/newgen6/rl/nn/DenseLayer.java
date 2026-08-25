@@ -2,17 +2,21 @@ package com.example.newgen6.rl.nn;
 
 import java.util.Random;
 
-/** A plain linear layer y = W x + b, with optional tanh activation, and backprop. */
 public final class DenseLayer {
+
+    public enum Activation {
+        NONE, RELU, TANH
+    }
+
     public final int inDim, outDim;
-    public final boolean useTanh;
+    public final Activation activation;
     public final float[][] W; // [out][in]
     public final float[] b;   // [out]
     public final float[][] gW;
     public final float[] gb;
 
-    public DenseLayer(int inDim, int outDim, boolean useTanh, Random rng) {
-        this.inDim = inDim; this.outDim = outDim; this.useTanh = useTanh;
+    public DenseLayer(int inDim, int outDim, Activation activation, Random rng) {
+        this.inDim = inDim; this.outDim = outDim; this.activation = activation;
         W = new float[outDim][inDim];
         b = new float[outDim];
         double limit = Math.sqrt(6.0 / (inDim + outDim));
@@ -21,6 +25,11 @@ public final class DenseLayer {
                 W[i][j] = (float) ((rng.nextDouble() * 2 - 1) * limit);
         gW = new float[outDim][inDim];
         gb = new float[outDim];
+    }
+
+    // Backward compatibility constructor for boolean useTanh
+    public DenseLayer(int inDim, int outDim, boolean useTanh, Random rng) {
+        this(inDim, outDim, useTanh ? Activation.TANH : Activation.NONE, rng);
     }
 
     public static final class Cache { public float[] x, preAct, out; }
@@ -34,16 +43,29 @@ public final class DenseLayer {
             pre[i] = sum;
         }
         float[] out = new float[outDim];
-        for (int i = 0; i < outDim; i++) out[i] = useTanh ? (float) Math.tanh(pre[i]) : pre[i];
+        for (int i = 0; i < outDim; i++) {
+            if (activation == Activation.TANH) {
+                out[i] = (float) Math.tanh(pre[i]);
+            } else if (activation == Activation.RELU) {
+                out[i] = Math.max(0f, pre[i]);
+            } else {
+                out[i] = pre[i];
+            }
+        }
         if (cache != null) { cache.x = x; cache.preAct = pre; cache.out = out; }
         return out;
     }
 
-    /** Backprop dL/dOut through this layer; accumulates gW/gb, returns dL/dX. */
     public float[] backward(Cache c, float[] dOut) {
         float[] dPre = new float[outDim];
         for (int i = 0; i < outDim; i++) {
-            dPre[i] = useTanh ? dOut[i] * (1 - c.out[i] * c.out[i]) : dOut[i];
+            if (activation == Activation.TANH) {
+                dPre[i] = dOut[i] * (1 - c.out[i] * c.out[i]);
+            } else if (activation == Activation.RELU) {
+                dPre[i] = c.out[i] > 0 ? dOut[i] : 0f;
+            } else {
+                dPre[i] = dOut[i];
+            }
         }
         float[] dX = new float[inDim];
         for (int i = 0; i < outDim; i++) {
