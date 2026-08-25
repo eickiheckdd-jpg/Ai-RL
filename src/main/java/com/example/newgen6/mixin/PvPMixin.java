@@ -12,15 +12,14 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class PvPMixin {
 
     @Inject(method = "tick", at = @At("TAIL"))
-    private void newgen6$overrideWithAiInput(boolean slowDown, float sprintMultiplier, CallbackInfo ci) {
+    private void newgen6$overrideWithAiInput(CallbackInfo ci) {
         if (!AiControlState.isAiControlEnabled()) return;
 
         KeyboardInput self = (KeyboardInput) (Object) this;
         AiControlState.PendingInput pending = AiControlState.consumePendingMovementInput();
         if (pending == null) return;
 
-        // Sanitize inputs to ensure mutually exclusive directional flags 
-        // and prevent server-side network protocol or sanity check errors.
+        // Sanitize inputs to ensure mutually exclusive directional flags
         boolean forward = pending.forward > 0f;
         boolean backward = pending.forward < 0f;
         if (forward && backward) {
