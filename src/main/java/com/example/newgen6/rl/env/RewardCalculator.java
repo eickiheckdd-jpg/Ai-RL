@@ -13,8 +13,8 @@ public class RewardCalculator {
     public float rewardDamageTaken = -1.0f;
     public float rewardTargetKilled = 5.0f;
     public float rewardSelfDied = -5.0f;
-    public float rewardTimeStep = -0.001f; // tiny time penalty to discourage stalling
-    public float rewardAiming = 0.02f;     // The breadcrumb trail!
+    public float rewardTimeStep = -0.001f;
+    public float rewardAiming = 0.02f;
 
     public float step(ClientPlayerEntity self, LivingEntity target) {
         float selfHealth = self.getHealth();
@@ -24,7 +24,6 @@ public class RewardCalculator {
 
         float reward = rewardTimeStep;
 
-        // Health & Damage Rewards
         if (lastSelfHealth >= 0f && selfHealth < lastSelfHealth) {
             reward += rewardDamageTaken;
         }
@@ -38,13 +37,11 @@ public class RewardCalculator {
             reward += rewardSelfDied;
         }
 
-        // --- The Crosshair Breadcrumb ---
         if (targetAlive) {
-            Vec3d rel = target.getPos().subtract(self.getPos());
+            Vec3d rel = target.getPosition().subtract(self.getPosition());
             double desiredYaw = Math.toDegrees(Math.atan2(-rel.x, rel.z));
             float yawDiff = Math.abs(wrapDegrees(self.getYaw() - (float) desiredYaw));
             
-            // If the enemy is within a 15-degree cone of the crosshair, reward the AI
             if (yawDiff < 15.0f) {
                 reward += rewardAiming;
             }
@@ -67,4 +64,3 @@ public class RewardCalculator {
         return d;
     }
 }
-
