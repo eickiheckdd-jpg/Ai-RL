@@ -2,49 +2,25 @@ package com.example.newgen6.rl.nn;
 
 import java.util.Random;
 
-/**
- * Single-layer GRU cell used as the "temporal encoder" from the HUD spec:
- *
- *     200 x 229 (raw ticks)  --->  temporal encoder  --->  compact latent (h)
- *
- * Rather than literally re-flattening 200 x 229 = 45,800 floats into a dense
- * network every tick (explicitly disallowed by the spec), the GRU hidden
- * state h_t is carried forward tick-to-tick:
- *
- *     h_t = GRU(obs_t, h_{t-1})
- *
- * h_t is a compressed running summary of roughly the last ~200 ticks of
- * history (bounded by the cell's forget/update gate dynamics), which is
- * exactly the "compact recurrent state" option the spec calls out as
- * suitable for 2GB RAM / Pojav. This h_t (not just obs_t) is what feeds the
- * policy/value heads, so the temporal context genuinely affects the policy -
- * it is not decorative HUD-only data.
- *
- * Equations (standard GRU, Cho et al. 2014):
- *   z_t    = sigmoid(Wz x_t + Uz h_{t-1} + bz)         // update gate
- *   r_t    = sigmoid(Wr x_t + Ur h_{t-1} + br)         // reset gate
- *   hHat_t = tanh(Wh x_t + Uh (r_t ⊙ h_{t-1}) + bh)     // candidate state
- *   h_t    = (1 - z_t) ⊙ h_{t-1} + z_t ⊙ hHat_t         // new hidden state
- */
 public final class GRUCell {
 
     public final int inputSize;
     public final int hiddenSize;
 
-    // Parameters: input->hidden (W*) and hidden->hidden (U*) weight matrices + biases.
-    public final float[][] Wz, Wr, Wh; // [hidden][input]
-    public final float[][] Uz, Ur, Uh; // [hidden][hidden]
-    public final float[] bz, br, bh;   // [hidden]
+    public final float[][] Wz, Wr, Wh; 
+    public final float[][] Uz, Ur, Uh; 
+    public final float[] bz, br, bh;   
 
-    // Gradient accumulators, same shapes as parameters. Zeroed via zeroGrad().
     public final float[][] gWz, gWr, gWh;
     public final float[][] gUz, gUr, gUh;
     public final float[] gbz, gbr, gbh;
 
-    /** Per-step cache needed for BPTT. One instance per timestep in a training segment. */
     public static final class StepCache {
         public float[] x, hPrev, z, r, hHat, h;
     }
+
+    // Added alias for compatibility with PolicyValueNetwork
+    public static final class Cache extends StepCache {}
 
     public GRUCell(int inputSize, int hiddenSize, Random rng) {
         this.inputSize = inputSize;
@@ -65,10 +41,6 @@ public final class GRUCell {
         gbz = new float[hiddenSize]; gbr = new float[hiddenSize]; gbh = new float[hiddenSize];
     }
 
-    /**
-     * Random init only - NO pretrained weights, per spec section 7.
-     * Glorot/Xavier-ish uniform init: U(-limit, limit), limit = sqrt(6/(fanIn+fanOut)).
-     */
     private static float[][] newMatrix(int rows, int cols, Random rng) {
         float[][] m = new float[rows][cols];
         double limit = Math.sqrt(6.0 / (rows + cols));
@@ -98,7 +70,6 @@ public final class GRUCell {
         return out;
     }
 
-    /** Forward one timestep. Returns new hidden state and fills cache for backward(). */
     public float[] forward(float[] x, float[] hPrev, StepCache cache) {
         float[] zPre = matVecPlusMatVecPlusBias(Wz, x, Uz, hPrev, bz);
         float[] rPre = matVecPlusMatVecPlusBias(Wr, x, Ur, hPrev, br);
@@ -130,11 +101,6 @@ public final class GRUCell {
         return h;
     }
 
-    /**
-     * Backpropagates dL/dh_t (dhNext) through this timestep, accumulating
-     * parameter gradients into the g* arrays and returning dL/dh_{t-1} so
-     * the caller can continue the chain backward through time (BPTT).
-     */
     public float[] backward(StepCache c, float[] dhNext) {
         float[] dz = new float[hiddenSize];
         float[] dhHat = new float[hiddenSize];
@@ -147,12 +113,11 @@ public final class GRUCell {
         }
 
         float[] dhHatPre = new float[hiddenSize];
-        for (int i = 0; i < hiddenSize; i++) dhHatPre[i] = dhHat[i] * (1 - c.hHat[i] * c.hHat[i]); // tanh'
+        for (int i = 0; i < hiddenSize; i++) dhHatPre[i] = dhHat[i] * (1 - c.hHat[i] * c.hHat[i]);
 
         float[] rh = new float[hiddenSize];
         for (int i = 0; i < hiddenSize; i++) rh[i] = c.r[i] * c.hPrev[i];
 
-        // Wh, Uh, bh gradients
         for (int i = 0; i < hiddenSize; i++) {
             float g = dhHatPre[i];
             for (int j = 0; j < inputSize; j++) gWh[i][j] += g * c.x[j];
@@ -160,7 +125,6 @@ public final class GRUCell {
             gbh[i] += g;
         }
 
-        // d(r ⊙ hPrev) = Uh^T dhHatPre
         float[] dRh = new float[hiddenSize];
         for (int i = 0; i < hiddenSize; i++) {
             float g = dhHatPre[i];
@@ -176,7 +140,7 @@ public final class GRUCell {
         float[] dzPre = new float[hiddenSize];
         float[] drPre = new float[hiddenSize];
         for (int i = 0; i < hiddenSize; i++) {
-            dzPre[i] = dz[i] * c.z[i] * (1 - c.z[i]);   // sigmoid'
+            dzPre[i] = dz[i] * c.z[i] * (1 - c.z[i]);
             drPre[i] = dr[i] * c.r[i] * (1 - c.r[i]);
         }
 
