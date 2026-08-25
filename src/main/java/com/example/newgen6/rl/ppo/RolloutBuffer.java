@@ -3,24 +3,17 @@ package com.example.newgen6.rl.ppo;
 import com.example.newgen6.rl.env.ObservationSchema;
 import com.example.newgen6.rl.nn.PolicyValueNetwork;
 
-/**
- * Fixed-capacity ring buffer of collected (obs, hiddenIn, actions,
- * oldLogProb, value, reward, done) transitions, one entry per Minecraft
- * tick. Pre-allocated primitive arrays only - "do NOT allocate 200 Java
- * objects every tick" (spec section 15) is honored here too: nothing is
- * boxed or allocated during collection, only plain array writes.
- */
 public final class RolloutBuffer {
 
     public final int capacity;
     private int writeIndex = 0;
     private int size = 0;
 
-    public final float[][] obs;        // [capacity][229]
-    public final float[][] hiddenIn;   // [capacity][HIDDEN_SIZE] - GRU state BEFORE this tick
+    public final float[][] obs;        
+    public final float[][] hiddenIn;   
     public final int[] moveAction, yawBucket, pitchBucket, jumpAction, sprintAction, sneakAction, attackAction;
-    public final double[] oldLogProb;  // joint log-prob at collection time (see PPOMath#jointLogProb)
-    public final float[] value;        // V(s_t) estimated at collection time
+    public final double[] oldLogProb;  
+    public final float[] value;        
     public final float[] reward;
     public final boolean[] done;
 
