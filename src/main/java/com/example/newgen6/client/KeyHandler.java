@@ -19,14 +19,14 @@ public class KeyHandler {
                 "key.newgen6.toggle_ai",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_C,
-                KeyBinding.MISC_CATEGORY
+                "key.categories.misc"
         ));
 
         toggleHudKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.newgen6.toggle_hud",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_X,
-                KeyBinding.MISC_CATEGORY
+                "key.categories.misc"
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
