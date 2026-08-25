@@ -6,6 +6,8 @@ import java.util.Random;
 
 public final class PolicyValueNetwork {
 
+    public static final int HIDDEN_SIZE = 128;
+
     public static final class Output {
         public double[] moveLogits, yawLogits, pitchLogits, jumpLogits, sprintLogits, sneakLogits, attackLogits;
         public double value;
@@ -71,7 +73,7 @@ public final class PolicyValueNetwork {
     }
 
     public void backwardSegment(List<StepCache> caches, List<HeadGrads> grads) {
-        float[] dHNext = new float[gru.hiddenSize]; // Fixed privacy access
+        float[] dHNext = new float[gru.hiddenSize];
 
         for (int t = caches.size() - 1; t >= 0; t--) {
             StepCache cache = caches.get(t);
@@ -94,7 +96,6 @@ public final class PolicyValueNetwork {
 
             float[] dHPrev = gru.backward(cache.gruCache, dHNext);
 
-            // Mask hidden gradient flow across episode boundaries
             if (cache.doneMask) {
                 for (int i = 0; i < dHPrev.length; i++) dHPrev[i] = 0.0f;
             }
@@ -125,14 +126,9 @@ public final class PolicyValueNetwork {
         for (int i = 0; i < target.length; i++) target[i] += src[i];
     }
 
-    // --- NEW METHODS REQUIRED BY MOD ENTRYPOINT ---
-
     public float[] initialHiddenState() {
         return new float[gru.hiddenSize];
     }
 
-    public void registerWith(AdamOptimizer optimizer) {
-        // Allows the mod entrypoint to pass the optimizer without crashing.
-        // Parameter registration logic should be handled by your optimizer.
-    }
+    public void registerWith(AdamOptimizer optimizer) {}
 }
