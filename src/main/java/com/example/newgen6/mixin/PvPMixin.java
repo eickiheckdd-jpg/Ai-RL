@@ -40,8 +40,6 @@ public class PvPMixin {
         ClientPlayerEntity self = client.player;
         LivingEntity target = findDummyTarget(client, self);
 
-        // 1) Score the action taken on the PREVIOUS tick using the health
-        //    deltas observed between then and now, then store the transition.
         if (pendingState != null) {
             float reward = rewardCalculator.step(self, target);
             boolean done = !self.isAlive();
@@ -49,7 +47,6 @@ public class PvPMixin {
             TrajectoryBuffer buffer = NewGen6RLMod.getBuffer();
             buffer.add(pendingState, pendingActions, reward, pendingValue, pendingLogProb, done);
 
-            // Send real-time reward to HUD
             RlHudOverlay.lastReward = reward;
 
             if (buffer.isFull()) {
@@ -66,14 +63,12 @@ public class PvPMixin {
             return;
         }
 
-        // 2) Observe the CURRENT state and act.
         float[] state = stateEncoder.encode(self, target);
         ActorCriticNetwork network = NewGen6RLMod.getNetwork();
         ActorCriticNetwork.StepResult step = network.act(state);
 
         applyAction(client, self, target, step.actions);
 
-        // Feed telemetry data to HUD
         RlHudOverlay.lastValue = step.value;
         RlHudOverlay.lastLogProb = step.logProb;
         RlHudOverlay.lastActionSummary = String.format("M:%d J:%d Y:%d P:%d A:%d", 
@@ -126,7 +121,7 @@ public class PvPMixin {
                 e -> e != self
                         && e.isAlive()
                         && !(e instanceof PlayerEntity) 
-                        && e.getScoreboardTags().contains("newgen6_dummy")
+                        && e.getCommandTags().contains("newgen6_dummy")
         );
         LivingEntity nearest = null;
         double best = Double.MAX_VALUE;
