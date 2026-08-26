@@ -1,4 +1,6 @@
-package com.example.newgen6.mixin;
+package com.example.newgen6.rl.env;
+
+import com.example.newgen6.mixin.PvPMixin;
 
 public final class PvPStateStore {
 
@@ -6,6 +8,7 @@ public final class PvPStateStore {
             PvPMixin.Snapshot.empty();
 
     private PvPStateStore() {
+        // Utility class; no instances.
     }
 
     public static PvPMixin.Snapshot getLatestSnapshot() {
