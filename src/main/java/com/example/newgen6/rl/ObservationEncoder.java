@@ -5,9 +5,8 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.item.ItemStack;
-import net.minecraft.item.AxeItem;
 import net.minecraft.item.ShieldItem;
-import net.minecraft.item.SwordItem;
+import net.minecraft.registry.tag.ItemTags;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.BlockPos;
@@ -129,7 +128,7 @@ public final class ObservationEncoder {
         out[b + 15] = p.isUsingItem() ? 1f : 0f;
         out[b + 16] = p.handSwinging ? 1f : 0f;
         out[b + 17] = p.getAttackCooldownProgress(0.5f);
-        out[b + 18] = MathUtil.clamp(p.fallDistance / 20f, 0f, 1f);
+        out[b + 18] = MathUtil.clamp((float) p.fallDistance / 20f, 0f, 1f);
 
         Vec3d v = p.getVelocity();
         out[b + 19] = MathUtil.clamp((float) v.x / 0.5f, -1f, 1f);
@@ -138,7 +137,7 @@ public final class ObservationEncoder {
 
         float yaw = p.getYaw();
         float pitch = p.getPitch();
-        float body = p.bodyYaw;
+        float body = p.getBodyYaw();
         out[b + 22] = MathHelper.sin(yaw * MathHelper.RADIANS_PER_DEGREE);
         out[b + 23] = MathHelper.cos(yaw * MathHelper.RADIANS_PER_DEGREE);
         out[b + 24] = pitch / 90f;
@@ -291,8 +290,8 @@ public final class ObservationEncoder {
         int b = RLConstants.ITEM_BASE;
         ItemStack main = p.getMainHandStack();
         ItemStack off = p.getOffHandStack();
-        out[b] = main.getItem() instanceof SwordItem ? 1f : 0f;
-        out[b + 1] = main.getItem() instanceof AxeItem ? 1f : 0f;
+        out[b] = main.isIn(ItemTags.SWORDS) ? 1f : 0f;
+        out[b + 1] = main.isIn(ItemTags.AXES) ? 1f : 0f;
         out[b + 2] = main.isEmpty() ? 1f : 0f;
         out[b + 3] = p.getAttackCooldownProgress(0.5f);
         out[b + 4] = off.isEmpty() ? 0f : 1f;
@@ -300,7 +299,7 @@ public final class ObservationEncoder {
         for (int i = 0; i < 9; i++) {
             out[b + 6 + i] = p.getInventory().getStack(i).isEmpty() ? 0f : 1f;
         }
-        out[b + 15] = p.getInventory().selectedSlot / 8f;
+        out[b + 15] = p.getInventory().getSelectedSlot() / 8f;
     }
 
     private void encodeTerrain(ClientPlayerEntity p, World world) {
