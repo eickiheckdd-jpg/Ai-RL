@@ -103,7 +103,7 @@ public class Observation {
             buffer[rayIdx++] = (float) (hitDist / 8.0);
         }
 
-        // Indices 160 - 228 remain initialized to 0.0f (Reserved for Action Memory)
+        // Indices 160 - 228 remain initialized to 0.0f (Reserved for future expansion)
         return buffer;
     }
 
