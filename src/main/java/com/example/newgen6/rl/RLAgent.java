@@ -46,7 +46,7 @@ public final class RLAgent {
             throw new IllegalArgumentException("observation cannot be null");
         }
 
-        float[] encoded = observation.encode();
+        float[] encoded = observation.copyValues();
         if (encoded.length != RLConstants.OBSERVATION_SIZE) {
             throw new IllegalStateException(
                     "Observation ABI mismatch: "
