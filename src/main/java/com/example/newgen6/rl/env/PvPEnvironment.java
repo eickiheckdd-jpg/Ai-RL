@@ -1,7 +1,5 @@
 package com.example.newgen6.rl.env;
 
-import com.example.newgen6.mixin.PvPMixin;
-
 /**
  * Minecraft-facing environment state bridge.
  *
