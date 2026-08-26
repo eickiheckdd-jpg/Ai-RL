@@ -1,13 +1,15 @@
 package com.example.newgen6.mixin;
 
-import com.example.newgen6.rl.env.PvPStateStore;
 import com.example.newgen6.rl.env.PvPSnapshot;
+import com.example.newgen6.rl.env.PvPStateStore;
+
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.network.OtherClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
 import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.math.Vec3d;
+
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
 import org.spongepowered.asm.mixin.injection.Inject;
@@ -20,7 +22,8 @@ public abstract class PvPMixin {
             method = "tick",
             at = @At("TAIL")
     )
-    private void newgen6$capturePvPState(CallbackInfo ci) {
+    private void newgen6$capturePvPState(
+            CallbackInfo ci) {
 
         ClientPlayerEntity self =
                 (ClientPlayerEntity) (Object) this;
