@@ -31,8 +31,18 @@ public abstract class PvPMixin {
         MinecraftClient client =
                 MinecraftClient.getInstance();
 
+        if (client == null) {
+            PvPStateStore.setLatestSnapshot(
+                    PvPSnapshot.empty()
+            );
+            return;
+        }
+
         ClientWorld world = client.world;
 
+        /*
+         * No usable Minecraft state.
+         */
         if (world == null || !self.isAlive()) {
             PvPStateStore.setLatestSnapshot(
                     PvPSnapshot.empty()
@@ -40,6 +50,9 @@ public abstract class PvPMixin {
             return;
         }
 
+        /*
+         * Find the nearest valid player target.
+         */
         OtherClientPlayerEntity nearestTarget = null;
 
         double nearestDistanceSq =
@@ -51,6 +64,9 @@ public abstract class PvPMixin {
                 continue;
             }
 
+            /*
+             * Only capture actual other client players.
+             */
             if (!(candidate instanceof OtherClientPlayerEntity other)) {
                 continue;
             }
@@ -68,122 +84,170 @@ public abstract class PvPMixin {
             }
         }
 
+        /*
+         * Self state.
+         */
         Vec3d selfVelocity =
                 self.getVelocity();
 
         PvPSnapshot snapshot;
 
+        /*
+         * --------------------------------------------------
+         * No target
+         * --------------------------------------------------
+         */
         if (nearestTarget == null) {
 
             snapshot = new PvPSnapshot(
                     true,
 
+                    // Self position
                     self.getX(),
                     self.getY(),
                     self.getZ(),
 
+                    // Self velocity
                     selfVelocity.x,
                     selfVelocity.y,
                     selfVelocity.z,
 
+                    // Self rotation
                     self.getYaw(),
                     self.getPitch(),
 
+                    // Self health
                     self.getHealth(),
                     self.getAbsorptionAmount(),
 
+                    // Self movement state
                     self.isOnGround(),
                     self.isSprinting(),
                     self.isSneaking(),
 
+                    // Attack cooldown
                     self.getAttackCooldownProgress(0.0f),
 
+                    // Target
                     false,
 
+                    // Target relative position
                     0.0,
                     0.0,
                     0.0,
 
+                    // Target velocity
                     0.0,
                     0.0,
                     0.0,
 
+                    // Target health
                     0.0f,
                     0.0f,
 
+                    // Target rotation
                     0.0f,
                     0.0f,
 
+                    // Target movement
                     false,
                     false,
 
-                    0.0,
-
-                    self.getYaw()
+                    // Target distance
+                    0.0
             );
 
-        } else {
+        }
+
+        /*
+         * --------------------------------------------------
+         * Target found
+         * --------------------------------------------------
+         */
+        else {
 
             Vec3d targetVelocity =
                     nearestTarget.getVelocity();
 
+            /*
+             * Target position relative to the player.
+             */
             double relativeX =
-                    nearestTarget.getX() - self.getX();
+                    nearestTarget.getX()
+                            - self.getX();
 
             double relativeY =
-                    nearestTarget.getY() - self.getY();
+                    nearestTarget.getY()
+                            - self.getY();
 
             double relativeZ =
-                    nearestTarget.getZ() - self.getZ();
+                    nearestTarget.getZ()
+                            - self.getZ();
 
             snapshot = new PvPSnapshot(
                     true,
 
+                    // Self position
                     self.getX(),
                     self.getY(),
                     self.getZ(),
 
+                    // Self velocity
                     selfVelocity.x,
                     selfVelocity.y,
                     selfVelocity.z,
 
+                    // Self rotation
                     self.getYaw(),
                     self.getPitch(),
 
+                    // Self health
                     self.getHealth(),
                     self.getAbsorptionAmount(),
 
+                    // Self movement state
                     self.isOnGround(),
                     self.isSprinting(),
                     self.isSneaking(),
 
+                    // Attack cooldown
                     self.getAttackCooldownProgress(0.0f),
 
+                    // Target exists
                     true,
 
+                    // Target relative position
                     relativeX,
                     relativeY,
                     relativeZ,
 
+                    // Target velocity
                     targetVelocity.x,
                     targetVelocity.y,
                     targetVelocity.z,
 
+                    // Target health
                     nearestTarget.getHealth(),
                     nearestTarget.getAbsorptionAmount(),
 
+                    // Target rotation
                     nearestTarget.getYaw(),
                     nearestTarget.getPitch(),
 
+                    // Target movement
                     nearestTarget.isOnGround(),
                     nearestTarget.isSprinting(),
 
-                    Math.sqrt(nearestDistanceSq),
-
-                    self.getYaw()
+                    // Target distance
+                    Math.sqrt(nearestDistanceSq)
             );
         }
 
+        /*
+         * Publish the immutable snapshot.
+         *
+         * PvPMixin does not perform RL decisions.
+         */
         PvPStateStore.setLatestSnapshot(snapshot);
     }
 }
