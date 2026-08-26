@@ -1,0 +1,22 @@
+package com.example.newgen6.mixin;
+
+public final class PvPStateStore {
+
+    private static volatile PvPMixin.Snapshot latestSnapshot =
+            PvPMixin.Snapshot.empty();
+
+    private PvPStateStore() {
+    }
+
+    public static PvPMixin.Snapshot getLatestSnapshot() {
+        return latestSnapshot;
+    }
+
+    public static void setLatestSnapshot(
+            PvPMixin.Snapshot snapshot) {
+
+        if (snapshot != null) {
+            latestSnapshot = snapshot;
+        }
+    }
+}
