@@ -1,7 +1,5 @@
 package com.example.newgen6.rl.env;
 
-import com.example.newgen6.mixin.PvPMixin;
-
 /**
  * Converts the raw Minecraft runtime snapshot into the fixed RL observation ABI.
  *
@@ -20,7 +18,7 @@ public final class ObservationEncoder {
 
     private ObservationEncoder() {}
 
-    public static float[] encode(PvPMixin.Snapshot s) {
+    public static float[] encode(PvPSnapshot s) {
         if (s == null) return emptyObservation();
 
         float[] out = new float[OBSERVATION_SIZE];
