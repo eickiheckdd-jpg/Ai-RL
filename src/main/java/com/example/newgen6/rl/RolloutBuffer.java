@@ -4,7 +4,6 @@ public class RolloutBuffer {
     public final int capacity;
     public int size = 0;
 
-    // Pre-allocated flat arrays to eliminate GC overhead
     public final float[][] states;
     public final float[][] actions;
     public final float[] rewards;
@@ -23,19 +22,17 @@ public class RolloutBuffer {
     }
 
     public void store(float[] state, float[] action, float reward, float value, float logProb, boolean done) {
-        if (size >= capacity) return; // Buffer is full, wait for PPO update
-
+        if (size >= capacity) return;
         System.arraycopy(state, 0, states[size], 0, state.length);
         System.arraycopy(action, 0, actions[size], 0, action.length);
         rewards[size] = reward;
         values[size] = value;
         logProbs[size] = logProb;
         dones[size] = done;
-        
         size++;
     }
 
     public void clear() {
-        size = 0; // Reset pointer without destroying memory
+        size = 0; // Reset pointer without triggering Garbage Collection
     }
 }
