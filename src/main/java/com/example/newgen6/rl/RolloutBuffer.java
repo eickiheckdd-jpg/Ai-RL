@@ -1,38 +1,30 @@
 package com.example.newgen6.rl;
 
+import java.util.ArrayList;
+import java.util.List;
+
 public class RolloutBuffer {
-    public final int capacity;
-    public int size = 0;
 
-    public final float[][] states;
-    public final float[][] actions;
-    public final float[] rewards;
-    public final float[] values;
-    public final float[] logProbs;
-    public final boolean[] dones;
+    public record Transition(
+        float[] state,
+        int moveAction,
+        int yawAction,
+        int pitchAction,
+        float reward,
+        boolean done
+    ) {}
 
-    public RolloutBuffer(int capacity, int stateSize, int actionSize) {
-        this.capacity = capacity;
-        this.states = new float[capacity][stateSize];
-        this.actions = new float[capacity][actionSize];
-        this.rewards = new float[capacity];
-        this.values = new float[capacity];
-        this.logProbs = new float[capacity];
-        this.dones = new boolean[capacity];
+    private final List<Transition> batch = new ArrayList<>();
+
+    public void add(float[] state, int moveAction, int yawAction, int pitchAction, float reward, boolean done) {
+        batch.add(new Transition(state, moveAction, yawAction, pitchAction, reward, done));
     }
 
-    public void store(float[] state, float[] action, float reward, float value, float logProb, boolean done) {
-        if (size >= capacity) return;
-        System.arraycopy(state, 0, states[size], 0, state.length);
-        System.arraycopy(action, 0, actions[size], 0, action.length);
-        rewards[size] = reward;
-        values[size] = value;
-        logProbs[size] = logProb;
-        dones[size] = done;
-        size++;
+    public List<Transition> getBatch() {
+        return batch;
     }
 
     public void clear() {
-        size = 0; // Reset pointer without triggering Garbage Collection
+        batch.clear();
     }
 }
