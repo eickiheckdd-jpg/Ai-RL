@@ -23,7 +23,7 @@ public class Observation {
             return buffer; 
         }
 
-        World world = player.getWorld();
+        World world = player.getEntityWorld();
 
         // ---------------------------------------------------------
         // SECTION 1: KINEMATICS & AIM GEOMETRY (Indices 0 - 11)
