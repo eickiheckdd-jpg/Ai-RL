@@ -37,7 +37,7 @@ public class NewGen6Client implements ClientModInitializer {
         }
 
         // 1.21 Fabric KeyBinding API update
-        KeyBinding.Category aiCategory = KeyBinding.Category.register(Identifier.of("newgen6", "ai"));
+        KeyBinding.Category aiCategory = KeyBinding.Category.create(Identifier.of("newgen6", "ai"));
         toggleAiKey = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.newgen6.toggle_ai", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_C, aiCategory
         ));
