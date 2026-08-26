@@ -1,5 +1,6 @@
 package com.example.newgen6.mixin;
 
+import com.example.newgen6.rl.env.PvPStateStore;
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.network.OtherClientPlayerEntity;
@@ -15,8 +16,8 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 public abstract class PvPMixin {
 
     @Inject(
-        method = "tick",
-        at = @At("TAIL")
+            method = "tick",
+            at = @At("TAIL")
     )
     private void newgen6$capturePvPState(CallbackInfo ci) {
         ClientPlayerEntity self =
