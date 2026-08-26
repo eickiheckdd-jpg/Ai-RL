@@ -33,6 +33,19 @@ public final class PolicyNetwork {
     private final float[] yawLogits = new float[RLConstants.YAW_BUCKETS];
     private final float[] pitchLogits = new float[RLConstants.PITCH_BUCKETS];
     private final float[] valueOut = new float[1];
+    private final float[] moveP = new float[RLConstants.MOVE_ACTIONS];
+    private final float[] yawP = new float[RLConstants.YAW_BUCKETS];
+    private final float[] pitchP = new float[RLConstants.PITCH_BUCKETS];
+    private final float[] dMove = new float[RLConstants.MOVE_ACTIONS];
+    private final float[] dYaw = new float[RLConstants.YAW_BUCKETS];
+    private final float[] dPitch = new float[RLConstants.PITCH_BUCKETS];
+    private final float[] dBin = new float[4];
+    private final float[] dTrunk = new float[RLConstants.TRUNK_SIZE];
+    private final float[] dTrunkTmp = new float[RLConstants.TRUNK_SIZE];
+    private final float[] dH1 = new float[RLConstants.HIDDEN];
+    private final float[] dTemporal;
+    private final float[] dFrame = new float[RLConstants.FRAME_ENC];
+    private final float[] dObs = new float[RLConstants.OBSERVATION_SIZE];
 
     private final float[] obsScratch = new float[RLConstants.OBSERVATION_SIZE];
     private final float[] meanScratch = new float[RLConstants.OBSERVATION_SIZE];
@@ -43,6 +56,7 @@ public final class PolicyNetwork {
         this.rng = new Random(seed);
         int temporalInSize = RLConstants.FRAME_ENC * (RLConstants.TEMPORAL_FRAMES + 1);
         this.temporalIn = new float[temporalInSize];
+        this.dTemporal = new float[temporalInSize];
 
         this.frameEnc = new DenseLayer(RLConstants.OBSERVATION_SIZE, RLConstants.FRAME_ENC, true, rng);
         this.trunk1 = new DenseLayer(temporalInSize, RLConstants.HIDDEN, true, rng);
@@ -81,11 +95,11 @@ public final class PolicyNetwork {
         buildTemporalInput(ctx);
         forwardTrunk();
 
-        float[] moveP = moveLogits.clone();
+        System.arraycopy(moveLogits, 0, moveP, 0, RLConstants.MOVE_ACTIONS);
         MathUtil.softmaxInPlace(moveP, 0, RLConstants.MOVE_ACTIONS);
-        float[] yawP = yawLogits.clone();
+        System.arraycopy(yawLogits, 0, yawP, 0, RLConstants.YAW_BUCKETS);
         MathUtil.softmaxInPlace(yawP, 0, RLConstants.YAW_BUCKETS);
-        float[] pitchP = pitchLogits.clone();
+        System.arraycopy(pitchLogits, 0, pitchP, 0, RLConstants.PITCH_BUCKETS);
         MathUtil.softmaxInPlace(pitchP, 0, RLConstants.PITCH_BUCKETS);
 
         ActionSample a = new ActionSample();
@@ -138,29 +152,23 @@ public final class PolicyNetwork {
         buildTemporalInput(ctx);
         forwardTrunk();
 
-        float[] moveP = moveLogits.clone();
+        System.arraycopy(moveLogits, 0, moveP, 0, RLConstants.MOVE_ACTIONS);
         MathUtil.softmaxInPlace(moveP, 0, RLConstants.MOVE_ACTIONS);
-        float[] yawP = yawLogits.clone();
+        System.arraycopy(yawLogits, 0, yawP, 0, RLConstants.YAW_BUCKETS);
         MathUtil.softmaxInPlace(yawP, 0, RLConstants.YAW_BUCKETS);
-        float[] pitchP = pitchLogits.clone();
+        System.arraycopy(pitchLogits, 0, pitchP, 0, RLConstants.PITCH_BUCKETS);
         MathUtil.softmaxInPlace(pitchP, 0, RLConstants.PITCH_BUCKETS);
 
         float newLogProb = jointLogProb(moveP, yawP, pitchP, taken);
-        float ratio = (float) Math.exp(newLogProb - oldLogProb);
-        float unclipped = ratio * advantage;
-        float clipped = MathUtil.clamp(ratio, 1f - clip, 1f + clip) * advantage;
-        float policyLoss = -Math.min(unclipped, clipped);
-
-        // Simple surrogate gradient via logit nudging (REINFORCE-style on discrete heads)
-        float scale = policyLoss; // magnitude; sign handled per-action below
+        float ratio = (float) Math.exp(MathUtil.clamp(newLogProb - oldLogProb, -20f, 20f));
         float advSign = advantage >= 0 ? 1f : -1f;
         float ratioFactor = (ratio > 1f + clip && advantage > 0) || (ratio < 1f - clip && advantage < 0)
                 ? 0f : 1f;
 
-        float[] dMove = new float[RLConstants.MOVE_ACTIONS];
-        float[] dYaw = new float[RLConstants.YAW_BUCKETS];
-        float[] dPitch = new float[RLConstants.PITCH_BUCKETS];
-        float[] dBin = new float[4];
+        java.util.Arrays.fill(dMove, 0f);
+        java.util.Arrays.fill(dYaw, 0f);
+        java.util.Arrays.fill(dPitch, 0f);
+        java.util.Arrays.fill(dBin, 0f);
 
         // Gradient of log π(a) w.r.t. logits ≈ 1_{a} - p
         for (int i = 0; i < RLConstants.MOVE_ACTIONS; i++) {
@@ -190,43 +198,28 @@ public final class PolicyNetwork {
 
         float[] dValue = new float[] { RLConstants.VALUE_COEF * 2f * (valueOut[0] - ret) };
 
-        // Backprop heads → trunk → temporal (frameEnc grads only from last forward mean path approx)
-        float[] dTrunk = new float[RLConstants.TRUNK_SIZE];
-        moveHead.backward(dMove, dTrunk);
-        float[] dTrunkB = new float[RLConstants.TRUNK_SIZE];
-        binaryHead.backward(dBin, dTrunkB);
-        MathUtil.axpy(dTrunk, dTrunkB, 1f, RLConstants.TRUNK_SIZE);
-        float[] dTrunkY = new float[RLConstants.TRUNK_SIZE];
-        yawHead.backward(dYaw, dTrunkY);
-        MathUtil.axpy(dTrunk, dTrunkY, 1f, RLConstants.TRUNK_SIZE);
-        float[] dTrunkP = new float[RLConstants.TRUNK_SIZE];
-        pitchHead.backward(dPitch, dTrunkP);
-        MathUtil.axpy(dTrunk, dTrunkP, 1f, RLConstants.TRUNK_SIZE);
-        float[] dTrunkV = new float[RLConstants.TRUNK_SIZE];
-        valueHead.backward(dValue, dTrunkV);
-        MathUtil.axpy(dTrunk, dTrunkV, 1f, RLConstants.TRUNK_SIZE);
+        // Backprop heads → trunk (reuse buffers — no per-step allocation)
+        java.util.Arrays.fill(dTrunk, 0f);
+        moveHead.backward(dMove, dTrunkTmp);
+        MathUtil.axpy(dTrunk, dTrunkTmp, 1f, RLConstants.TRUNK_SIZE);
+        binaryHead.backward(dBin, dTrunkTmp);
+        MathUtil.axpy(dTrunk, dTrunkTmp, 1f, RLConstants.TRUNK_SIZE);
+        yawHead.backward(dYaw, dTrunkTmp);
+        MathUtil.axpy(dTrunk, dTrunkTmp, 1f, RLConstants.TRUNK_SIZE);
+        pitchHead.backward(dPitch, dTrunkTmp);
+        MathUtil.axpy(dTrunk, dTrunkTmp, 1f, RLConstants.TRUNK_SIZE);
+        valueHead.backward(dValue, dTrunkTmp);
+        MathUtil.axpy(dTrunk, dTrunkTmp, 1f, RLConstants.TRUNK_SIZE);
 
-        float[] dH1 = new float[RLConstants.HIDDEN];
         trunk2.backward(dTrunk, dH1);
-        float[] dTemporal = new float[temporalIn.length];
         trunk1.backward(dH1, dTemporal);
 
-        // Backprop frame encoder on the mean path (last FRAME_ENC slice) + age-0 path
-        float[] dFrame = new float[RLConstants.FRAME_ENC];
+        // Mean-path frameEnc grad only (cheapest correct path)
         int meanOff = RLConstants.FRAME_ENC * RLConstants.TEMPORAL_FRAMES;
         System.arraycopy(dTemporal, meanOff, dFrame, 0, RLConstants.FRAME_ENC);
-        float[] dObs = new float[RLConstants.OBSERVATION_SIZE];
-        // Re-run mean encoding path for correct lastIn
         ctx.mean(meanScratch);
         frameEnc.forward(meanScratch, frameBuf);
         frameEnc.backward(dFrame, dObs);
-
-        float[] dFrame0 = new float[RLConstants.FRAME_ENC];
-        System.arraycopy(dTemporal, 0, dFrame0, 0, RLConstants.FRAME_ENC);
-        ctx.copyAge(0, obsScratch);
-        frameEnc.forward(obsScratch, frameBuf);
-        float[] dObs0 = new float[RLConstants.OBSERVATION_SIZE];
-        frameEnc.backward(dFrame0, dObs0);
     }
 
     public void zeroGrads() {
@@ -251,6 +244,78 @@ public final class PolicyNetwork {
         yawHead.adamStep(lr, b1, b2, eps, adamT);
         pitchHead.adamStep(lr, b1, b2, eps, adamT);
         valueHead.adamStep(lr, b1, b2, eps, adamT);
+    }
+
+
+    public static final int BRAIN_VERSION = 1;
+    public static final int BRAIN_MAGIC = 0x4E473642; // "NG6B"
+
+    /**
+     * Save all layer weights to a binary brain file.
+     * Does not store Adam moments (fresh optimizer on load is fine).
+     */
+    public void save(java.nio.file.Path path) throws java.io.IOException {
+        java.nio.file.Files.createDirectories(path.getParent());
+        try (java.io.DataOutputStream out = new java.io.DataOutputStream(
+                new java.io.BufferedOutputStream(java.nio.file.Files.newOutputStream(path)))) {
+            out.writeInt(BRAIN_MAGIC);
+            out.writeInt(BRAIN_VERSION);
+            out.writeInt(RLConstants.OBSERVATION_SIZE);
+            out.writeInt(RLConstants.CONTEXT_TICKS);
+            out.writeInt(RLConstants.YAW_BUCKETS);
+            out.writeInt(RLConstants.PITCH_BUCKETS);
+            out.writeInt(RLConstants.FRAME_ENC);
+            out.writeInt(RLConstants.TRUNK_SIZE);
+            out.writeInt(RLConstants.HIDDEN);
+            out.writeInt(adamT);
+            frameEnc.writeWeights(out);
+            trunk1.writeWeights(out);
+            trunk2.writeWeights(out);
+            moveHead.writeWeights(out);
+            binaryHead.writeWeights(out);
+            yawHead.writeWeights(out);
+            pitchHead.writeWeights(out);
+            valueHead.writeWeights(out);
+        }
+    }
+
+    public void load(java.nio.file.Path path) throws java.io.IOException {
+        try (java.io.DataInputStream in = new java.io.DataInputStream(
+                new java.io.BufferedInputStream(java.nio.file.Files.newInputStream(path)))) {
+            int magic = in.readInt();
+            if (magic != BRAIN_MAGIC) {
+                throw new java.io.IOException("Not a NEWGEN6 brain file (bad magic)");
+            }
+            int ver = in.readInt();
+            if (ver != BRAIN_VERSION) {
+                throw new java.io.IOException("Brain version " + ver + " != " + BRAIN_VERSION);
+            }
+            int obs = in.readInt();
+            int ctx = in.readInt();
+            int yawB = in.readInt();
+            int pitchB = in.readInt();
+            int frame = in.readInt();
+            int trunk = in.readInt();
+            int hidden = in.readInt();
+            if (obs != RLConstants.OBSERVATION_SIZE
+                    || yawB != RLConstants.YAW_BUCKETS
+                    || pitchB != RLConstants.PITCH_BUCKETS
+                    || frame != RLConstants.FRAME_ENC
+                    || trunk != RLConstants.TRUNK_SIZE
+                    || hidden != RLConstants.HIDDEN) {
+                throw new java.io.IOException("Brain architecture mismatch with current RLConstants");
+            }
+            // ctx ticks may differ; still load weights
+            adamT = in.readInt();
+            frameEnc.readWeights(in);
+            trunk1.readWeights(in);
+            trunk2.readWeights(in);
+            moveHead.readWeights(in);
+            binaryHead.readWeights(in);
+            yawHead.readWeights(in);
+            pitchHead.readWeights(in);
+            valueHead.readWeights(in);
+        }
     }
 
     private static int argmax(float[] p, int n) {
