@@ -165,7 +165,7 @@ public abstract class PvPMixin {
         latestSnapshot = snapshot;
     }
 
-    private static Snapshot getLatestSnapshot() {
+    public static Snapshot getLatestSnapshot() {
         return latestSnapshot;
     }
 
