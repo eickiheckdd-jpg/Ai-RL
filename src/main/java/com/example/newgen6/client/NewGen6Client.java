@@ -11,14 +11,20 @@ import net.minecraft.client.gui.DrawContext;
 import net.minecraft.client.option.KeyBinding;
 import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.client.util.InputUtil;
+import net.minecraft.util.Identifier;
 import org.lwjgl.glfw.GLFW;
 
 /**
  * Client entry: C = AI, X = HUD, V = aim-only curriculum toggle.
  * AI starts OFF. aimOnly starts ON (phase-1 aim training).
+ *
+ * 1.21.11: KeyBinding category is KeyBinding.Category, not a raw String.
  */
 public final class NewGen6Client implements ClientModInitializer {
     public static final CombatAgent AGENT = new CombatAgent();
+
+    private static final KeyBinding.Category CATEGORY =
+            KeyBinding.Category.create(Identifier.of("newgen6", "main"));
 
     private static KeyBinding aiToggle;
     private static KeyBinding hudToggle;
@@ -30,19 +36,19 @@ public final class NewGen6Client implements ClientModInitializer {
                 "key.newgen6.ai",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_C,
-                "category.newgen6"
+                CATEGORY
         ));
         hudToggle = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.newgen6.hud",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_X,
-                "category.newgen6"
+                CATEGORY
         ));
         aimOnlyToggle = KeyBindingHelper.registerKeyBinding(new KeyBinding(
                 "key.newgen6.aimonly",
                 InputUtil.Type.KEYSYM,
                 GLFW.GLFW_KEY_V,
-                "category.newgen6"
+                CATEGORY
         ));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
