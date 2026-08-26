@@ -109,4 +109,27 @@ public final class DenseLayer {
     public void clipAccumulate(float[] flat, int offset) {
         // optional: export grads — not required for in-place adam
     }
+
+    /** Write weights + bias (not Adam moments). */
+    public void writeWeights(java.io.DataOutputStream out) throws java.io.IOException {
+        out.writeInt(in);
+        out.writeInt(outDim());
+        for (float v : w) out.writeFloat(v);
+        for (float v : b) out.writeFloat(v);
+    }
+
+    public void readWeights(java.io.DataInputStream in) throws java.io.IOException {
+        int rin = in.readInt();
+        int rout = in.readInt();
+        if (rin != this.in || rout != outDim()) {
+            throw new java.io.IOException("DenseLayer shape mismatch: file "
+                    + rin + "x" + rout + " vs " + this.in + "x" + outDim());
+        }
+        for (int i = 0; i < w.length; i++) w[i] = in.readFloat();
+        for (int i = 0; i < b.length; i++) b[i] = in.readFloat();
+    }
+
+    private int outDim() {
+        return out;
+    }
 }
