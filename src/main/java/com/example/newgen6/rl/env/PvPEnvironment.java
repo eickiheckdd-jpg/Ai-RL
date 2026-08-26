@@ -1,6 +1,8 @@
 package com.example.newgen6.rl.env;
 
+import com.example.newgen6.mixin.PvPMixin;
 import com.example.newgen6.mixin.PvPStateStore;
+
 /**
  * Minecraft-facing environment state bridge.
  *
@@ -57,11 +59,13 @@ public final class PvPEnvironment {
     }
 
     public Step observe(long tick) {
+
         PvPMixin.Snapshot snapshot =
-                PvPMixin.getLatestSnapshot();
+                PvPStateStore.getLatestSnapshot();
 
         if (snapshot == null || !snapshot.valid) {
             episodeActive = false;
+
             return new Step(
                     Observation.empty(tick),
                     0.0f,
@@ -75,12 +79,18 @@ public final class PvPEnvironment {
 
         float reward = 0.0f;
 
-        float selfHealth = snapshot.selfHealth;
-        float targetHealth = snapshot.targetHealth;
+        float selfHealth =
+                snapshot.selfHealth;
+
+        float targetHealth =
+                snapshot.targetHealth;
 
         /*
-         * Positive change in target damage produces positive reward.
-         * Positive change in self damage produces negative reward.
+         * Positive change in target damage produces
+         * positive reward.
+         *
+         * Positive change in self damage produces
+         * negative reward.
          *
          * No combat timing or attack rule is hardcoded here.
          */
@@ -122,11 +132,13 @@ public final class PvPEnvironment {
             reward -= defeatPenalty;
         }
 
-        previousSelfHealth = selfHealth;
-        previousTargetHealth =
-                snapshot.targetPresent
-                        ? targetHealth
-                        : previousTargetHealth;
+        previousSelfHealth =
+                selfHealth;
+
+        if (snapshot.targetPresent) {
+            previousTargetHealth =
+                    targetHealth;
+        }
 
         if (done) {
             episodeActive = false;
@@ -142,12 +154,13 @@ public final class PvPEnvironment {
     /**
      * Builds an observation from the latest raw snapshot.
      *
-     * This currently delegates to the existing ObservationEncoder so there
-     * is only one observation ABI. No duplicate ObservationBuilder is needed.
+     * This delegates to Observation.fromSnapshot so there is
+     * only one observation ABI.
      */
     public Observation currentObservation(long tick) {
+
         PvPMixin.Snapshot snapshot =
-                PvPMixin.getLatestSnapshot();
+                PvPStateStore.getLatestSnapshot();
 
         if (snapshot == null || !snapshot.valid) {
             return Observation.empty(tick);
@@ -191,5 +204,6 @@ public final class PvPEnvironment {
             Observation observation,
             float reward,
             boolean done
-    ) {}
+    ) {
+    }
 }
