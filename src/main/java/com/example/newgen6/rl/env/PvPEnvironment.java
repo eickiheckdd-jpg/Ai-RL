@@ -1,7 +1,6 @@
 package com.example.newgen6.rl.env;
 
 import com.example.newgen6.mixin.PvPMixin;
-import com.example.newgen6.mixin.PvPStateStore;
 
 /**
  * Minecraft-facing environment state bridge.
@@ -145,7 +144,7 @@ public final class PvPEnvironment {
         }
 
         return new Step(
-                Observation.empty(tick),
+                currentObservation(tick),
                 finite(reward),
                 done
         );
