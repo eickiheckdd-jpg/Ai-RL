@@ -59,7 +59,7 @@ public final class PvPEnvironment {
 
     public Step observe(long tick) {
 
-        PvPMixin.Snapshot snapshot =
+        PvPSnapshot snapshot =
                 PvPStateStore.getLatestSnapshot();
 
         if (snapshot == null || !snapshot.valid) {
@@ -132,7 +132,7 @@ public final class PvPEnvironment {
 
     public Observation currentObservation(long tick) {
 
-        PvPMixin.Snapshot snapshot =
+        PvPSnapshot snapshot =
                 PvPStateStore.getLatestSnapshot();
 
         if (snapshot == null || !snapshot.valid) {
@@ -152,7 +152,7 @@ public final class PvPEnvironment {
     }
 
     private void beginEpisode(
-            PvPMixin.Snapshot snapshot) {
+            PvPSnapshot snapshot) {
 
         previousSelfHealth =
                 snapshot.selfHealth;
