@@ -112,53 +112,29 @@ public final class PvPSnapshot {
         this.selfSprinting = selfSprinting;
         this.selfSneaking = selfSneaking;
 
-        this.selfAttackCooldown =
-                selfAttackCooldown;
+        this.selfAttackCooldown = selfAttackCooldown;
 
-        this.targetPresent =
-                targetPresent;
+        this.targetPresent = targetPresent;
 
-        this.targetRelativeX =
-                targetRelativeX;
+        this.targetRelativeX = targetRelativeX;
+        this.targetRelativeY = targetRelativeY;
+        this.targetRelativeZ = targetRelativeZ;
 
-        this.targetRelativeY =
-                targetRelativeY;
+        this.targetVelocityX = targetVelocityX;
+        this.targetVelocityY = targetVelocityY;
+        this.targetVelocityZ = targetVelocityZ;
 
-        this.targetRelativeZ =
-                targetRelativeZ;
+        this.targetHealth = targetHealth;
+        this.targetAbsorption = targetAbsorption;
 
-        this.targetVelocityX =
-                targetVelocityX;
+        this.targetYaw = targetYaw;
+        this.targetPitch = targetPitch;
 
-        this.targetVelocityY =
-                targetVelocityY;
+        this.targetOnGround = targetOnGround;
+        this.targetSprinting = targetSprinting;
 
-        this.targetVelocityZ =
-                targetVelocityZ;
-
-        this.targetHealth =
-                targetHealth;
-
-        this.targetAbsorption =
-                targetAbsorption;
-
-        this.targetYaw =
-                targetYaw;
-
-        this.targetPitch =
-                targetPitch;
-
-        this.targetOnGround =
-                targetOnGround;
-
-        this.targetSprinting =
-                targetSprinting;
-
-        this.targetDistance =
-                targetDistance;
-
-        this.selfYawForTargetContext =
-                selfYawForTargetContext;
+        this.targetDistance = targetDistance;
+        this.selfYawForTargetContext = selfYawForTargetContext;
     }
 
     public static PvPSnapshot empty() {
