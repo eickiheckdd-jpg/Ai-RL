@@ -5,10 +5,8 @@ import com.example.newgen6.mixin.PvPMixin;
 /**
  * Minecraft-facing environment state bridge.
  *
- * This first version is deliberately observation/reward oriented.
- * It does not execute policy actions and does not manipulate Minecraft.
- *
- * The control layer can later consume Action separately.
+ * Observation/reward only.
+ * This class does not execute actions.
  */
 public final class PvPEnvironment {
 
@@ -22,12 +20,7 @@ public final class PvPEnvironment {
     private boolean episodeActive;
 
     public PvPEnvironment() {
-        this(
-                1.0f,
-                1.0f,
-                10.0f,
-                10.0f
-        );
+        this(1.0f, 1.0f, 10.0f, 10.0f);
     }
 
     public PvPEnvironment(
@@ -39,20 +32,27 @@ public final class PvPEnvironment {
         if (!Float.isFinite(damageRewardScale)
                 || damageRewardScale < 0.0f) {
             throw new IllegalArgumentException(
-                    "damageRewardScale must be finite and >= 0"
-            );
+                    "damageRewardScale must be finite and >= 0");
         }
 
         if (!Float.isFinite(damageTakenPenaltyScale)
                 || damageTakenPenaltyScale < 0.0f) {
             throw new IllegalArgumentException(
-                    "damageTakenPenaltyScale must be finite and >= 0"
-            );
+                    "damageTakenPenaltyScale must be finite and >= 0");
+        }
+
+        if (!Float.isFinite(victoryReward)) {
+            throw new IllegalArgumentException(
+                    "victoryReward must be finite");
+        }
+
+        if (!Float.isFinite(defeatPenalty)) {
+            throw new IllegalArgumentException(
+                    "defeatPenalty must be finite");
         }
 
         this.damageRewardScale = damageRewardScale;
-        this.damageTakenPenaltyScale =
-                damageTakenPenaltyScale;
+        this.damageTakenPenaltyScale = damageTakenPenaltyScale;
         this.victoryReward = victoryReward;
         this.defeatPenalty = defeatPenalty;
     }
@@ -76,52 +76,34 @@ public final class PvPEnvironment {
             beginEpisode(snapshot);
         }
 
-        float reward = 0.0f;
+        float selfHealth = snapshot.selfHealth;
+        float targetHealth = snapshot.targetHealth;
 
-        float selfHealth =
-                snapshot.selfHealth;
+        float targetDamage = Math.max(
+                0.0f,
+                previousTargetHealth - targetHealth
+        );
 
-        float targetHealth =
-                snapshot.targetHealth;
+        float selfDamage = Math.max(
+                0.0f,
+                previousSelfHealth - selfHealth
+        );
 
-        /*
-         * Positive change in target damage produces
-         * positive reward.
-         *
-         * Positive change in self damage produces
-         * negative reward.
-         *
-         * No combat timing or attack rule is hardcoded here.
-         */
-        float targetDamage =
-                Math.max(
-                        0.0f,
-                        previousTargetHealth - targetHealth
-                );
-
-        float selfDamage =
-                Math.max(
-                        0.0f,
-                        previousSelfHealth - selfHealth
-                );
-
-        reward +=
-                targetDamage * damageRewardScale;
-
-        reward -=
-                selfDamage * damageTakenPenaltyScale;
+        float reward =
+                targetDamage * damageRewardScale
+                - selfDamage * damageTakenPenaltyScale;
 
         boolean selfDead =
                 selfHealth <= 0.0f;
 
         boolean targetDead =
                 snapshot.targetPresent
-                        && targetHealth <= 0.0f;
+                && targetHealth <= 0.0f;
 
         boolean done =
                 selfDead
-                        || targetDead
-                        || !snapshot.targetPresent;
+                || targetDead
+                || !snapshot.targetPresent;
 
         if (targetDead) {
             reward += victoryReward;
@@ -131,12 +113,10 @@ public final class PvPEnvironment {
             reward -= defeatPenalty;
         }
 
-        previousSelfHealth =
-                selfHealth;
+        previousSelfHealth = selfHealth;
 
         if (snapshot.targetPresent) {
-            previousTargetHealth =
-                    targetHealth;
+            previousTargetHealth = targetHealth;
         }
 
         if (done) {
@@ -150,12 +130,6 @@ public final class PvPEnvironment {
         );
     }
 
-    /**
-     * Builds an observation from the latest raw snapshot.
-     *
-     * This delegates to Observation.fromSnapshot so there is
-     * only one observation ABI.
-     */
     public Observation currentObservation(long tick) {
 
         PvPMixin.Snapshot snapshot =
