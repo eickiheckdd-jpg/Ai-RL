@@ -56,8 +56,8 @@ public final class Observation {
      * Creates an Observation from a raw Minecraft snapshot.
      */
     public static Observation fromSnapshot(
-            com.example.newgen6.mixin.PvPMixin.Snapshot snapshot,
-            long tick) {
+        PvPSnapshot snapshot,
+        long tick) {
 
         if (snapshot == null) {
             return empty(tick);
