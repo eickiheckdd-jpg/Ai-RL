@@ -1,19 +1,12 @@
 package com.example.newgen6;
 
+import com.example.newgen6.client.RLClientRuntime;
 import com.example.newgen6.hud.TrainingState;
 import com.example.newgen6.rl.RLAgent;
 import net.fabricmc.api.ClientModInitializer;
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.minecraft.client.MinecraftClient;
 
 /**
  * Main client entrypoint declared by fabric.mod.json.
- *
- * The initial integration is intentionally conservative:
- * - creates the Java-only RL agent
- * - keeps RL state on the client
- * - does not assume undocumented Minecraft APIs
- * - leaves environment observation/action application to dedicated layers
  */
 public final class NewGen6RLMod implements ClientModInitializer {
 
@@ -25,18 +18,12 @@ public final class NewGen6RLMod implements ClientModInitializer {
     public void onInitializeClient() {
         agent = new RLAgent(new java.util.Random());
 
-        ClientTickEvents.END_CLIENT_TICK.register(
-                NewGen6RLMod::onClientTick
-        );
-    }
-
-    private static void onClientTick(MinecraftClient client) {
-        if (client == null) {
-            return;
-        }
-
-        // Integration is deliberately kept separate from Minecraft API
-        // assumptions. The environment/mixin layer will feed observations.
+        // Initializes:
+        // - C = AI/training toggle
+        // - X = HUD toggle
+        // - RL training runtime
+        // - live training HUD
+        RLClientRuntime.initialize();
     }
 
     public static RLAgent agent() {
@@ -45,6 +32,7 @@ public final class NewGen6RLMod implements ClientModInitializer {
                     "NewGen6RLMod has not been initialized"
             );
         }
+
         return agent;
     }
 
