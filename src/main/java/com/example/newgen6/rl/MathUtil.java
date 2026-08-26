@@ -7,6 +7,11 @@ final class MathUtil {
         return v < lo ? lo : (v > hi ? hi : v);
     }
 
+    /** Integer clamp — required so AimBuckets/ContextBuffer do not get float→int lossy conversion. */
+    static int clamp(int v, int lo, int hi) {
+        return v < lo ? lo : (v > hi ? hi : v);
+    }
+
     static float tanh(float x) {
         if (x > 20f) return 1f;
         if (x < -20f) return -1f;
