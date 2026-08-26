@@ -3,100 +3,106 @@ package com.example.newgen6.rl;
 import java.util.Random;
 
 public class PolicyNetwork {
-    private final int inputSize;
-    private final int hiddenSize;
-    private final int outputSize;
+    public static final int INPUT_SIZE = 45800; // 200 Ticks x 229 Features
+    public static final int TRUNK_SIZE = 128;   // Latent Trunk dimension
 
-    // Trainable Parameters
-    private final float[][] w1; 
-    private final float[] b1;   
-    private final float[][] w2; 
-    private final float[] b2;   
-    private final float[] logStd;
+    public static final int MOVE_BINS = 9;
+    public static final int TOGGLE_BINS = 4;   // Jump, Sprint, Attack, Sneak
+    public static final int YAW_BINS = 19;
+    public static final int PITCH_BINS = 17;
 
-    // Cache Arrays (Prevents object recreation during inference)
-    private final float[] hiddenActivation;
-    private final float[] actionMeans;
-    private final float[] sampledActions;
+    private final float[][] wTrunk = new float[INPUT_SIZE][TRUNK_SIZE];
+    private final float[] bTrunk = new float[TRUNK_SIZE];
+    private final float[] trunkActivation = new float[TRUNK_SIZE];
+
+    private final float[][] wMove = new float[TRUNK_SIZE][MOVE_BINS];
+    private final float[][] wToggle = new float[TRUNK_SIZE][TOGGLE_BINS];
+    private final float[][] wYaw = new float[TRUNK_SIZE][YAW_BINS];
+    private final float[][] wPitch = new float[TRUNK_SIZE][PITCH_BINS];
+
+    public final float[] moveProbs = new float[MOVE_BINS];
+    public final float[] toggleProbs = new float[TOGGLE_BINS];
+    public final float[] yawProbs = new float[YAW_BINS];
+    public final float[] pitchProbs = new float[PITCH_BINS];
 
     private final Random random = new Random();
 
-    public PolicyNetwork(int inputSize, int hiddenSize, int outputSize) {
-        this.inputSize = inputSize;
-        this.hiddenSize = hiddenSize;
-        this.outputSize = outputSize;
-
-        this.w1 = new float[inputSize][hiddenSize];
-        this.b1 = new float[hiddenSize];
-        this.w2 = new float[hiddenSize][outputSize];
-        this.b2 = new float[outputSize];
-        this.logStd = new float[outputSize];
-
-        this.hiddenActivation = new float[hiddenSize];
-        this.actionMeans = new float[outputSize];
-        this.sampledActions = new float[outputSize];
-
-        initializeXavier();
+    public PolicyNetwork() {
+        initializeWeights(wTrunk, INPUT_SIZE, TRUNK_SIZE);
+        initializeWeights(wMove, TRUNK_SIZE, MOVE_BINS);
+        initializeWeights(wToggle, TRUNK_SIZE, TOGGLE_BINS);
+        initializeWeights(wYaw, TRUNK_SIZE, YAW_BINS);
+        initializeWeights(wPitch, TRUNK_SIZE, PITCH_BINS);
     }
 
-    private void initializeXavier() {
-        float limit1 = (float) Math.sqrt(6.0 / (inputSize + hiddenSize));
-        for (int i = 0; i < inputSize; i++) {
-            for (int j = 0; j < hiddenSize; j++) {
-                w1[i][j] = (random.nextFloat() * 2.0f - 1.0f) * limit1;
+    private void initializeWeights(float[][] matrix, int in, int out) {
+        float limit = (float) Math.sqrt(6.0 / (in + out));
+        for (int i = 0; i < in; i++) {
+            for (int j = 0; j < out; j++) {
+                matrix[i][j] = (random.nextFloat() * 2.0f - 1.0f) * limit;
             }
-        }
-
-        float limit2 = (float) Math.sqrt(6.0 / (hiddenSize + outputSize));
-        for (int i = 0; i < hiddenSize; i++) {
-            for (int j = 0; j < outputSize; j++) {
-                w2[i][j] = (random.nextFloat() * 2.0f - 1.0f) * limit2;
-            }
-        }
-
-        // Start with moderate action variance (~0.5 std deviation)
-        for (int i = 0; i < outputSize; i++) {
-            logStd[i] = -0.693f; 
         }
     }
 
-    public float[] forward(float[] state) {
-        // 1. Input -> Hidden Layer (ReLU)
-        for (int j = 0; j < hiddenSize; j++) {
-            float sum = b1[j];
-            for (int i = 0; i < inputSize; i++) {
-                sum += state[i] * w1[i][j];
+    public void forward(float[] flattenedContext) {
+        for (int j = 0; j < TRUNK_SIZE; j++) {
+            float sum = bTrunk[j];
+            for (int i = 0; i < INPUT_SIZE; i++) {
+                sum += flattenedContext[i] * wTrunk[i][j];
             }
-            hiddenActivation[j] = Math.max(0.0f, sum); 
+            trunkActivation[j] = Math.max(0.0f, sum);
         }
 
-        // 2. Hidden -> Output Layer (Tanh ensures output is strictly [-1.0, 1.0])
-        for (int j = 0; j < outputSize; j++) {
-            float sum = b2[j];
-            for (int i = 0; i < hiddenSize; i++) {
-                sum += hiddenActivation[i] * w2[i][j];
-            }
-            actionMeans[j] = (float) Math.tanh(sum);
-        }
-
-        return actionMeans;
+        computeSoftmax(trunkActivation, wMove, moveProbs);
+        computeSigmoid(trunkActivation, wToggle, toggleProbs);
+        computeSoftmax(trunkActivation, wYaw, yawProbs);
+        computeSoftmax(trunkActivation, wPitch, pitchProbs);
     }
 
-    public float[] sampleAction(float[] state) {
-        forward(state);
-
-        for (int i = 0; i < outputSize; i++) {
-            float std = (float) Math.exp(logStd[i]);
-            float noise = (float) random.nextGaussian();
-            float action = actionMeans[i] + (std * noise);
-
-            // Enforce hard clamp so network actions never break Minecraft limits
-            sampledActions[i] = Math.max(-1.0f, Math.min(1.0f, action));
+    private void computeSoftmax(float[] hidden, float[][] weights, float[] outputProbs) {
+        float max = -1e9f;
+        for (int j = 0; j < outputProbs.length; j++) {
+            float sum = 0.0f;
+            for (int i = 0; i < hidden.length; i++) {
+                sum += hidden[i] * weights[i][j];
+            }
+            outputProbs[j] = sum;
+            if (sum > max) max = sum;
         }
-
-        return sampledActions;
+        float expSum = 0.0f;
+        for (int j = 0; j < outputProbs.length; j++) {
+            outputProbs[j] = (float) Math.exp(outputProbs[j] - max);
+            expSum += outputProbs[j];
+        }
+        for (int j = 0; j < outputProbs.length; j++) {
+            outputProbs[j] /= expSum;
+        }
     }
 
-    // Accessors for PPO Trainer Backpropagation
-    public float[][] getW2() { return w2; }
+    private void computeSigmoid(float[] hidden, float[][] weights, float[] outputProbs) {
+        for (int j = 0; j < outputProbs.length; j++) {
+            float sum = 0.0f;
+            for (int i = 0; i < hidden.length; i++) {
+                sum += hidden[i] * weights[i][j];
+            }
+            outputProbs[j] = 1.0f / (1.0f + (float) Math.exp(-sum));
+        }
+    }
+
+    public int sampleCategorical(float[] probs) {
+        float r = random.nextFloat();
+        float cumulative = 0.0f;
+        for (int i = 0; i < probs.length; i++) {
+            cumulative += probs[i];
+            if (r <= cumulative) return i;
+        }
+        return probs.length - 1;
+    }
+
+    // Getters for disk serialization
+    public float[][] getWTrunk() { return wTrunk; }
+    public float[][] getWMove() { return wMove; }
+    public float[][] getWToggle() { return wToggle; }
+    public float[][] getWYaw() { return wYaw; }
+    public float[][] getWPitch() { return wPitch; }
 }
