@@ -14,29 +14,32 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(ClientPlayerEntity.class)
 public abstract class PvPMixin {
 
-    private static volatile Snapshot latestSnapshot = Snapshot.empty();
-
     @Inject(
         method = "tick",
         at = @At("TAIL")
     )
     private void newgen6$capturePvPState(CallbackInfo ci) {
-        ClientPlayerEntity self = (ClientPlayerEntity) (Object) this;
+        ClientPlayerEntity self =
+                (ClientPlayerEntity) (Object) this;
 
-        // In Minecraft 1.21.11 Yarn, use the client world directly rather
-        // than relying on a getWorld() method that is not present here.
-        MinecraftClient client = MinecraftClient.getInstance();
+        MinecraftClient client =
+                MinecraftClient.getInstance();
+
         ClientWorld world = client.world;
 
         if (world == null || !self.isAlive()) {
-            latestSnapshot = Snapshot.empty();
+            PvPStateStore.setLatestSnapshot(
+                    Snapshot.empty()
+            );
             return;
         }
 
         OtherClientPlayerEntity nearestTarget = null;
-        double nearestDistanceSq = Double.POSITIVE_INFINITY;
+        double nearestDistanceSq =
+                Double.POSITIVE_INFINITY;
 
         for (PlayerEntity candidate : world.getPlayers()) {
+
             if (candidate == self) {
                 continue;
             }
@@ -49,7 +52,8 @@ public abstract class PvPMixin {
                 continue;
             }
 
-            double distanceSq = self.squaredDistanceTo(other);
+            double distanceSq =
+                    self.squaredDistanceTo(other);
 
             if (distanceSq < nearestDistanceSq) {
                 nearestDistanceSq = distanceSq;
@@ -57,116 +61,123 @@ public abstract class PvPMixin {
             }
         }
 
-        Vec3d selfVelocity = self.getVelocity();
+        Vec3d selfVelocity =
+                self.getVelocity();
 
         Snapshot snapshot;
 
         if (nearestTarget == null) {
+
             snapshot = new Snapshot(
-                true,
+                    true,
 
-                self.getX(),
-                self.getY(),
-                self.getZ(),
+                    self.getX(),
+                    self.getY(),
+                    self.getZ(),
 
-                selfVelocity.x,
-                selfVelocity.y,
-                selfVelocity.z,
+                    selfVelocity.x,
+                    selfVelocity.y,
+                    selfVelocity.z,
 
-                self.getYaw(),
-                self.getPitch(),
+                    self.getYaw(),
+                    self.getPitch(),
 
-                self.getHealth(),
-                self.getAbsorptionAmount(),
+                    self.getHealth(),
+                    self.getAbsorptionAmount(),
 
-                self.isOnGround(),
-                self.isSprinting(),
-                self.isSneaking(),
+                    self.isOnGround(),
+                    self.isSprinting(),
+                    self.isSneaking(),
 
-                self.getAttackCooldownProgress(0.0f),
+                    self.getAttackCooldownProgress(0.0f),
 
-                false,
+                    false,
 
-                0.0,
-                0.0,
-                0.0,
+                    0.0,
+                    0.0,
+                    0.0,
 
-                0.0,
-                0.0,
-                0.0,
+                    0.0,
+                    0.0,
+                    0.0,
 
-                0.0f,
-                0.0f,
+                    0.0f,
+                    0.0f,
 
-                0.0f,
-                0.0f,
+                    0.0f,
+                    0.0f,
 
-                false,
-                false,
+                    false,
+                    false,
 
-                0.0,
+                    0.0,
 
-                0.0f
+                    self.getYaw()
             );
-        } else {
-            Vec3d targetVelocity = nearestTarget.getVelocity();
 
-            double relativeX = nearestTarget.getX() - self.getX();
-            double relativeY = nearestTarget.getY() - self.getY();
-            double relativeZ = nearestTarget.getZ() - self.getZ();
+        } else {
+
+            Vec3d targetVelocity =
+                    nearestTarget.getVelocity();
+
+            double relativeX =
+                    nearestTarget.getX() - self.getX();
+
+            double relativeY =
+                    nearestTarget.getY() - self.getY();
+
+            double relativeZ =
+                    nearestTarget.getZ() - self.getZ();
 
             snapshot = new Snapshot(
-                true,
+                    true,
 
-                self.getX(),
-                self.getY(),
-                self.getZ(),
+                    self.getX(),
+                    self.getY(),
+                    self.getZ(),
 
-                selfVelocity.x,
-                selfVelocity.y,
-                selfVelocity.z,
+                    selfVelocity.x,
+                    selfVelocity.y,
+                    selfVelocity.z,
 
-                self.getYaw(),
-                self.getPitch(),
+                    self.getYaw(),
+                    self.getPitch(),
 
-                self.getHealth(),
-                self.getAbsorptionAmount(),
+                    self.getHealth(),
+                    self.getAbsorptionAmount(),
 
-                self.isOnGround(),
-                self.isSprinting(),
-                self.isSneaking(),
+                    self.isOnGround(),
+                    self.isSprinting(),
+                    self.isSneaking(),
 
-                self.getAttackCooldownProgress(0.0f),
+                    self.getAttackCooldownProgress(0.0f),
 
-                true,
+                    true,
 
-                relativeX,
-                relativeY,
-                relativeZ,
+                    relativeX,
+                    relativeY,
+                    relativeZ,
 
-                targetVelocity.x,
-                targetVelocity.y,
-                targetVelocity.z,
+                    targetVelocity.x,
+                    targetVelocity.y,
+                    targetVelocity.z,
 
-                nearestTarget.getHealth(),
-                nearestTarget.getAbsorptionAmount(),
+                    nearestTarget.getHealth(),
+                    nearestTarget.getAbsorptionAmount(),
 
-                nearestTarget.getYaw(),
-                nearestTarget.getPitch(),
+                    nearestTarget.getYaw(),
+                    nearestTarget.getPitch(),
 
-                nearestTarget.isOnGround(),
-                nearestTarget.isSprinting(),
+                    nearestTarget.isOnGround(),
+                    nearestTarget.isSprinting(),
 
-                Math.sqrt(nearestDistanceSq),
-                self.getYaw()
+                    Math.sqrt(nearestDistanceSq),
+
+                    self.getYaw()
             );
         }
 
-        latestSnapshot = snapshot;
-    }
-
-    public static Snapshot getLatestSnapshot() {
-        return latestSnapshot;
+        PvPStateStore.setLatestSnapshot(snapshot);
     }
 
     public static final class Snapshot {
@@ -186,9 +197,11 @@ public abstract class PvPMixin {
 
         public final float selfHealth;
         public final float selfAbsorption;
+
         public final boolean selfOnGround;
         public final boolean selfSprinting;
         public final boolean selfSneaking;
+
         public final float selfAttackCooldown;
 
         public final boolean targetPresent;
@@ -203,58 +216,61 @@ public abstract class PvPMixin {
 
         public final float targetHealth;
         public final float targetAbsorption;
+
         public final float targetYaw;
         public final float targetPitch;
+
         public final boolean targetOnGround;
         public final boolean targetSprinting;
 
         public final double targetDistance;
+
         public final float selfYawForTargetContext;
 
         public Snapshot(
-            boolean valid,
+                boolean valid,
 
-            double selfX,
-            double selfY,
-            double selfZ,
+                double selfX,
+                double selfY,
+                double selfZ,
 
-            double selfVelocityX,
-            double selfVelocityY,
-            double selfVelocityZ,
+                double selfVelocityX,
+                double selfVelocityY,
+                double selfVelocityZ,
 
-            float selfYaw,
-            float selfPitch,
+                float selfYaw,
+                float selfPitch,
 
-            float selfHealth,
-            float selfAbsorption,
+                float selfHealth,
+                float selfAbsorption,
 
-            boolean selfOnGround,
-            boolean selfSprinting,
-            boolean selfSneaking,
+                boolean selfOnGround,
+                boolean selfSprinting,
+                boolean selfSneaking,
 
-            float selfAttackCooldown,
+                float selfAttackCooldown,
 
-            boolean targetPresent,
+                boolean targetPresent,
 
-            double targetRelativeX,
-            double targetRelativeY,
-            double targetRelativeZ,
+                double targetRelativeX,
+                double targetRelativeY,
+                double targetRelativeZ,
 
-            double targetVelocityX,
-            double targetVelocityY,
-            double targetVelocityZ,
+                double targetVelocityX,
+                double targetVelocityY,
+                double targetVelocityZ,
 
-            float targetHealth,
-            float targetAbsorption,
+                float targetHealth,
+                float targetAbsorption,
 
-            float targetYaw,
-            float targetPitch,
+                float targetYaw,
+                float targetPitch,
 
-            boolean targetOnGround,
-            boolean targetSprinting,
+                boolean targetOnGround,
+                boolean targetSprinting,
 
-            double targetDistance,
-            float selfYawForTargetContext
+                double targetDistance,
+                float selfYawForTargetContext
         ) {
             this.valid = valid;
 
@@ -276,62 +292,101 @@ public abstract class PvPMixin {
             this.selfSprinting = selfSprinting;
             this.selfSneaking = selfSneaking;
 
-            this.selfAttackCooldown = selfAttackCooldown;
+            this.selfAttackCooldown =
+                    selfAttackCooldown;
 
-            this.targetPresent = targetPresent;
+            this.targetPresent =
+                    targetPresent;
 
-            this.targetRelativeX = targetRelativeX;
-            this.targetRelativeY = targetRelativeY;
-            this.targetRelativeZ = targetRelativeZ;
+            this.targetRelativeX =
+                    targetRelativeX;
 
-            this.targetVelocityX = targetVelocityX;
-            this.targetVelocityY = targetVelocityY;
-            this.targetVelocityZ = targetVelocityZ;
+            this.targetRelativeY =
+                    targetRelativeY;
 
-            this.targetHealth = targetHealth;
-            this.targetAbsorption = targetAbsorption;
+            this.targetRelativeZ =
+                    targetRelativeZ;
 
-            this.targetYaw = targetYaw;
-            this.targetPitch = targetPitch;
+            this.targetVelocityX =
+                    targetVelocityX;
 
-            this.targetOnGround = targetOnGround;
-            this.targetSprinting = targetSprinting;
+            this.targetVelocityY =
+                    targetVelocityY;
 
-            this.targetDistance = targetDistance;
-            this.selfYawForTargetContext = selfYawForTargetContext;
+            this.targetVelocityZ =
+                    targetVelocityZ;
+
+            this.targetHealth =
+                    targetHealth;
+
+            this.targetAbsorption =
+                    targetAbsorption;
+
+            this.targetYaw =
+                    targetYaw;
+
+            this.targetPitch =
+                    targetPitch;
+
+            this.targetOnGround =
+                    targetOnGround;
+
+            this.targetSprinting =
+                    targetSprinting;
+
+            this.targetDistance =
+                    targetDistance;
+
+            this.selfYawForTargetContext =
+                    selfYawForTargetContext;
         }
 
         public static Snapshot empty() {
             return new Snapshot(
-                false,
+                    false,
 
-                0.0, 0.0, 0.0,
+                    0.0,
+                    0.0,
+                    0.0,
 
-                0.0, 0.0, 0.0,
+                    0.0,
+                    0.0,
+                    0.0,
 
-                0.0f, 0.0f,
+                    0.0f,
+                    0.0f,
 
-                0.0f, 0.0f,
+                    0.0f,
+                    0.0f,
 
-                false, false, false,
+                    false,
+                    false,
+                    false,
 
-                0.0f,
+                    0.0f,
 
-                false,
+                    false,
 
-                0.0, 0.0, 0.0,
+                    0.0,
+                    0.0,
+                    0.0,
 
-                0.0, 0.0, 0.0,
+                    0.0,
+                    0.0,
+                    0.0,
 
-                0.0f, 0.0f,
+                    0.0f,
+                    0.0f,
 
-                0.0f, 0.0f,
+                    0.0f,
+                    0.0f,
 
-                false, false,
+                    false,
+                    false,
 
-                0.0,
+                    0.0,
 
-                0.0f
+                    0.0f
             );
         }
     }
