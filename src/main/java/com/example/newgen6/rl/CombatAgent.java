@@ -31,6 +31,9 @@ public final class CombatAgent {
     public float meanReward;
     public float lastAimError = 1f;
     public ActionSample lastAction;
+    public boolean brainLoaded;
+    public String lastBrainMessage = "no brain";
+    private int savesSinceStart;
 
     private float prevAimError = 1f;
     private boolean prevHadTarget;
@@ -41,7 +44,10 @@ public final class CombatAgent {
 
     public void toggleAi() {
         aiEnabled = !aiEnabled;
-        if (!aiEnabled) releaseControls();
+        if (!aiEnabled) {
+            releaseControls();
+            saveBrain(); // checkpoint when disabling AI
+        }
     }
 
     public void toggleHud() {
@@ -92,7 +98,7 @@ public final class CombatAgent {
         float aimErr = encoder.hasTarget()
                 ? encoder.aimErrorAfterCamera(player)
                 : 1f;
-        float reward = computeAimReward(aimErr, encoder.hasTarget(), encoder.sameTargetAsPrevious());
+        float reward = computeAimReward(aimErr, encoder.hasTarget(), encoder.sameTargetAsPrevious(), player.getPitch());
 
         prevAimError = encoder.hasTarget() ? aimErr : 1f;
         prevHadTarget = encoder.hasTarget();
@@ -105,13 +111,60 @@ public final class CombatAgent {
         envSteps++;
 
         if (trainEnabled) {
-            boolean done = !player.isAlive();
-            rollout.add(obs, context, action, reward, done);
-            if (rollout.isFull()) {
-                trainer.update(rollout, trainScratch);
-                rollout.clear();
+            // Never start a new rollout while a PPO update is still draining across ticks.
+            if (!trainer.isTraining()) {
+                boolean done = !player.isAlive();
+                rollout.add(obs, context, action, reward, done);
+                if (rollout.isFull()) {
+                    trainer.beginUpdate(rollout, trainScratch);
+                }
             }
         }
+        // Spread PPO across ticks — prevents multi-second freezes → 0 FPS.
+        if (trainer.isTraining()) {
+            boolean finished = trainer.tickWork();
+            if (finished) {
+                maybeAutosaveBrain();
+            }
+        }
+    }
+
+    /** Load brain from default path if present. Call once on client init. */
+    public boolean loadBrain() {
+        try {
+            java.nio.file.Path path = BrainIO.defaultPath();
+            if (!java.nio.file.Files.isRegularFile(path)) {
+                lastBrainMessage = "no file";
+                brainLoaded = false;
+                return false;
+            }
+            policy.load(path);
+            brainLoaded = true;
+            lastBrainMessage = "loaded " + path.getFileName();
+            return true;
+        } catch (Exception e) {
+            brainLoaded = false;
+            lastBrainMessage = "load fail: " + e.getMessage();
+            return false;
+        }
+    }
+
+    public boolean saveBrain() {
+        try {
+            java.nio.file.Path path = BrainIO.defaultPath();
+            policy.save(path);
+            savesSinceStart++;
+            lastBrainMessage = "saved #" + savesSinceStart;
+            return true;
+        } catch (Exception e) {
+            lastBrainMessage = "save fail: " + e.getMessage();
+            return false;
+        }
+    }
+
+    private void maybeAutosaveBrain() {
+        // After every PPO update
+        saveBrain();
     }
 
     /**
@@ -121,26 +174,33 @@ public final class CombatAgent {
      *   no target      → mild constant penalty
      * Clipped to [-1, 1].
      */
-    private float computeAimReward(float aimErr, boolean hasTarget, boolean sameTarget) {
+    private float computeAimReward(float aimErr, boolean hasTarget, boolean sameTarget, float pitchDeg) {
         if (!hasTarget) {
             prevAimError = 1f;
-            return RLConstants.REWARD_NO_TARGET;
+            // Still punish sky-stare with no target
+            float sky = Math.max(0f, Math.abs(pitchDeg) - 30f) / 60f;
+            return RLConstants.REWARD_NO_TARGET - RLConstants.REWARD_PITCH_EXTREME * sky;
         }
         float absTerm = -RLConstants.REWARD_ABS_WEIGHT * aimErr;
         float deltaTerm = 0f;
         if (sameTarget && prevHadTarget) {
             deltaTerm = RLConstants.REWARD_DELTA_WEIGHT * (prevAimError - aimErr);
         } else {
-            // Target just appeared or switched: absolute only + tiny switch cost
             deltaTerm = 0f;
             absTerm += RLConstants.REWARD_TARGET_SWITCH;
         }
-        return MathUtil.clamp(absTerm + deltaTerm, -1f, 1f);
+        // Extreme pitch (sky/ground) is almost never useful in melee — stop drift.
+        float sky = Math.max(0f, Math.abs(pitchDeg) - 25f) / 65f;
+        float pitchPen = -RLConstants.REWARD_PITCH_EXTREME * sky;
+        return MathUtil.clamp(absTerm + deltaTerm + pitchPen, -1f, 1f);
     }
 
     private void applyAction(MinecraftClient client, ClientPlayerEntity player, ActionSample a) {
         float newYaw = player.getYaw() + a.yawDeltaDeg;
-        float newPitch = MathHelper.clamp(player.getPitch() + a.pitchDeltaDeg, -90f, 90f);
+        // Soft combat clamp first (stops random walk to ±90 sky/ground), hard clamp second.
+        float newPitch = player.getPitch() + a.pitchDeltaDeg;
+        newPitch = MathHelper.clamp(newPitch, -RLConstants.COMBAT_PITCH_MAX, RLConstants.COMBAT_PITCH_MAX);
+        newPitch = MathHelper.clamp(newPitch, -90f, 90f);
         player.setYaw(newYaw);
         player.setPitch(newPitch);
 
