@@ -52,7 +52,7 @@ public final class Observation {
     }
 
     public static Observation fromSnapshot(
-            PvPMixin.Snapshot snapshot,
+            PvPSnapshot snapshot,
             long tick) {
 
         if (snapshot == null) {
