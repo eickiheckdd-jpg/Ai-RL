@@ -1,5 +1,6 @@
 package com.example.newgen6.mixin;
 
+import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.network.OtherClientPlayerEntity;
 import net.minecraft.client.world.ClientWorld;
@@ -13,14 +14,6 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(ClientPlayerEntity.class)
 public abstract class PvPMixin {
 
-    /**
-     * Latest observation-oriented runtime snapshot.
-     *
-     * This is intentionally observation-only for the first milestone:
-     * no AI control, no attack automation, no movement manipulation.
-     *
-     * The RL observation encoder can consume this later.
-     */
     private static volatile Snapshot latestSnapshot = Snapshot.empty();
 
     @Inject(
@@ -30,9 +23,10 @@ public abstract class PvPMixin {
     private void newgen6$capturePvPState(CallbackInfo ci) {
         ClientPlayerEntity self = (ClientPlayerEntity) (Object) this;
 
-        ClientWorld world = self.getWorld() instanceof ClientWorld clientWorld
-            ? clientWorld
-            : null;
+        // In Minecraft 1.21.11 Yarn, use the client world directly rather
+        // than relying on a getWorld() method that is not present here.
+        MinecraftClient client = MinecraftClient.getInstance();
+        ClientWorld world = client.world;
 
         if (world == null || !self.isAlive()) {
             latestSnapshot = Snapshot.empty();
@@ -107,12 +101,12 @@ public abstract class PvPMixin {
                 0.0f,
                 0.0f,
 
-                0.0f,
-                0.0f,
+                false,
+                false,
 
                 0.0,
-                0.0,
-                0.0
+
+                0.0f
             );
         } else {
             Vec3d targetVelocity = nearestTarget.getVelocity();
@@ -171,11 +165,6 @@ public abstract class PvPMixin {
         latestSnapshot = snapshot;
     }
 
-    /**
-     * Returns the latest observation-oriented snapshot.
-     *
-     * The object is immutable, so readers do not need synchronization.
-     */
     public static Snapshot getLatestSnapshot() {
         return latestSnapshot;
     }
@@ -184,21 +173,17 @@ public abstract class PvPMixin {
 
         public final boolean valid;
 
-        // Self position
         public final double selfX;
         public final double selfY;
         public final double selfZ;
 
-        // Self velocity
         public final double selfVelocityX;
         public final double selfVelocityY;
         public final double selfVelocityZ;
 
-        // Self rotation
         public final float selfYaw;
         public final float selfPitch;
 
-        // Self combat/state
         public final float selfHealth;
         public final float selfAbsorption;
         public final boolean selfOnGround;
@@ -206,20 +191,16 @@ public abstract class PvPMixin {
         public final boolean selfSneaking;
         public final float selfAttackCooldown;
 
-        // Target
         public final boolean targetPresent;
 
-        // Relative target position
         public final double targetRelativeX;
         public final double targetRelativeY;
         public final double targetRelativeZ;
 
-        // Target velocity
         public final double targetVelocityX;
         public final double targetVelocityY;
         public final double targetVelocityZ;
 
-        // Target combat/state
         public final float targetHealth;
         public final float targetAbsorption;
         public final float targetYaw;
@@ -227,10 +208,7 @@ public abstract class PvPMixin {
         public final boolean targetOnGround;
         public final boolean targetSprinting;
 
-        // Distance
         public final double targetDistance;
-
-        // Reserved/simple heading signal
         public final float selfYawForTargetContext;
 
         public Snapshot(
@@ -320,7 +298,6 @@ public abstract class PvPMixin {
             this.targetSprinting = targetSprinting;
 
             this.targetDistance = targetDistance;
-
             this.selfYawForTargetContext = selfYawForTargetContext;
         }
 
