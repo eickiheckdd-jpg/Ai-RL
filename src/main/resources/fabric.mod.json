@@ -1,24 +1,23 @@
 {
   "schemaVersion": 1,
   "id": "newgen6",
-  "version": "${version}",
-  "name": "NewGen6 AI",
-  "description": "NewGen6 Transformer client AI for Pojav/Fabric.",
-  "authors": [
-    "NewGen6"
-  ],
-  "environment": "client",
+  "version": "2.0.0",
+  "name": "NEWGEN6 RL",
+  "description": "Minecraft PvP reinforcement learning AI — 229F × 200T pure Java PPO",
+  "authors": ["NEWGEN6"],
+  "environment": "*",
   "entrypoints": {
-    "client": [
+    "main": [
       "com.example.newgen6.NewGen6RLMod"
+    ],
+    "client": [
+      "com.example.newgen6.client.NewGen6Client"
     ]
   },
-  "mixins": [
-    "newgen6.mixins.json"
-  ],
   "depends": {
     "fabricloader": ">=0.18.0",
     "minecraft": "~1.21.11",
+    "java": ">=21",
     "fabric-api": "*"
   }
 }
