@@ -1,19 +1,21 @@
 package com.example.newgen6.rl.env;
 
+import com.example.newgen6.mixin.PvPMixin;
+
 public final class PvPStateStore {
 
-    private static volatile PvPSnapshot latestSnapshot =
-            PvPSnapshot.empty();
+    private static volatile PvPMixin.Snapshot latestSnapshot =
+            PvPMixin.Snapshot.empty();
 
     private PvPStateStore() {
     }
 
-    public static PvPSnapshot getLatestSnapshot() {
+    public static PvPMixin.Snapshot getLatestSnapshot() {
         return latestSnapshot;
     }
 
     public static void setLatestSnapshot(
-            PvPSnapshot snapshot) {
+            PvPMixin.Snapshot snapshot) {
 
         if (snapshot != null) {
             latestSnapshot = snapshot;
