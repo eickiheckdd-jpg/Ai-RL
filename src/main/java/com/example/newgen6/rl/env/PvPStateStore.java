@@ -15,7 +15,7 @@ public final class PvPStateStore {
     }
 
     public static void setLatestSnapshot(
-            PvPMixin.Snapshot snapshot) {
+            PvPSnapshot snapshot) {
 
         if (snapshot != null) {
             latestSnapshot = snapshot;
