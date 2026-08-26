@@ -38,27 +38,36 @@ public final class RLConstants {
     public static final float MELEE_RANGE = 3.5f;
 
     public static final float MAX_YAW_DELTA_DEG = 30.0f;
-    public static final float MAX_PITCH_DELTA_DEG = 20.0f;
+    public static final float MAX_PITCH_DELTA_DEG = 15.0f; // was 20 — less sky walk per tick
+
+    /** Soft combat pitch range; hard clamp remains ±90. */
+    public static final float COMBAT_PITCH_MAX = 55.0f;
 
     /**
-     * Aim-only reward (train phase 1). Hardened against oscillation / switch exploits:
-     *   r = ABS_WEIGHT * (-aimErr) + DELTA_WEIGHT * (prevErr - aimErr)
-     * Delta is applied only when the same target entity continues.
+     * Aim-only reward (train phase 1). Hardened against oscillation / switch / sky exploits.
      */
-    public static final float REWARD_ABS_WEIGHT = 0.05f;
-    public static final float REWARD_DELTA_WEIGHT = 0.5f;
+    public static final float REWARD_ABS_WEIGHT = 0.08f;
+    public static final float REWARD_DELTA_WEIGHT = 0.4f;
     public static final float REWARD_NO_TARGET = -0.02f;
-    public static final float REWARD_TARGET_SWITCH = -0.01f; // absolute-only tick, mild
+    public static final float REWARD_TARGET_SWITCH = -0.01f;
+    /** Penalty for extreme pitch (looking at sky/ground) — stops sky drift. */
+    public static final float REWARD_PITCH_EXTREME = 0.04f;
 
-    public static final int PPO_ROLLOUT = 256;
-    public static final int PPO_EPOCHS = 4;
-    public static final int PPO_MINIBATCH = 64;
+    /**
+     * Client-tick safe PPO: small rollout, 1 epoch, few steps per tick.
+     * Full 4×256 on the render thread caused 0 FPS freezes.
+     */
+    public static final int PPO_ROLLOUT = 128;
+    public static final int PPO_EPOCHS = 1;
+    public static final int PPO_MINIBATCH = 32;
+    /** Max transitions to train per client tick (spread update across ticks). */
+    public static final int PPO_STEPS_PER_TICK = 16;
     public static final float PPO_CLIP = 0.2f;
     public static final float GAMMA = 0.99f;
     public static final float GAE_LAMBDA = 0.95f;
-    public static final float ENTROPY_COEF = 0.01f;
+    public static final float ENTROPY_COEF = 0.005f; // lower — less random sky exploration
     public static final float VALUE_COEF = 0.5f;
-    public static final float LR = 3e-4f;
+    public static final float LR = 2e-4f;
     public static final float MAX_GRAD_NORM = 1.0f;
 
     public static void assertObsSize(int n) {
