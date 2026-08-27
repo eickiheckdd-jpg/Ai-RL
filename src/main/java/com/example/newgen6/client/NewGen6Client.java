@@ -34,7 +34,7 @@ public class NewGen6Client implements ClientModInitializer {
 
     public static final PPOAgent AGENT = new PPOAgent();
 
-    private static boolean aiEnabled = true;
+    private static boolean aiEnabled = false; // start OFF — press C to enable
     private static boolean debugVisible = true;
     private static long tickCounter = 0;
 
@@ -69,29 +69,41 @@ public class NewGen6Client implements ClientModInitializer {
                 "key.newgen6.emergency", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F9, CATEGORY));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            while (keyToggleAI.wasPressed()) {
+            // Prefer KeyBinding.wasPressed; also edge-detect raw keys so C/X always work
+            // even if another system eats the binding.
+            boolean cPressed = keyToggleAI.wasPressed() || rawEdge(client, GLFW.GLFW_KEY_C, 0);
+            boolean xPressed = keyToggleDebug.wasPressed() || rawEdge(client, GLFW.GLFW_KEY_X, 1);
+            boolean f6 = keySave.wasPressed() || rawEdge(client, GLFW.GLFW_KEY_F6, 2);
+            boolean f7 = keyEval.wasPressed() || rawEdge(client, GLFW.GLFW_KEY_F7, 3);
+            boolean f8 = keyReplay.wasPressed() || rawEdge(client, GLFW.GLFW_KEY_F8, 4);
+            boolean f9 = keyEmergency.wasPressed() || rawEdge(client, GLFW.GLFW_KEY_F9, 5);
+
+            if (cPressed) {
                 aiEnabled = !aiEnabled;
+                if (!aiEnabled) {
+                    InputController.releaseAll(client);
+                }
                 System.out.println("[NEWGEN6] AI " + (aiEnabled ? "ENABLED" : "DISABLED"));
             }
-            while (keyToggleDebug.wasPressed()) {
+            if (xPressed) {
                 debugVisible = !debugVisible;
                 System.out.println("[NEWGEN6] Debug HUD " + (debugVisible ? "ON" : "OFF"));
             }
-            while (keySave.wasPressed()) {
+            if (f6) {
                 AGENT.getCheckpoints().saveLatest(AGENT);
                 AGENT.getCheckpoints().saveVersioned(AGENT);
                 System.out.println("[NEWGEN6] Manual save complete");
             }
-            while (keyEval.wasPressed()) {
+            if (f7) {
                 boolean now = !AGENT.isTraining();
                 AGENT.setTraining(now);
                 System.out.println("[NEWGEN6] Mode → " + (now ? "TRAINING" : "EVALUATION"));
             }
-            while (keyReplay.wasPressed()) {
+            if (f8) {
                 if (AGENT.getReplay().isRecording()) AGENT.getReplay().stopAndSave();
                 else AGENT.getReplay().start();
             }
-            while (keyEmergency.wasPressed()) {
+            if (f9) {
                 if (AGENT.isEmergency()) {
                     AGENT.clearEmergency();
                     aiEnabled = true;
@@ -99,12 +111,26 @@ public class NewGen6Client implements ClientModInitializer {
                 } else {
                     AGENT.emergencyStop();
                     aiEnabled = false;
+                    InputController.releaseAll(client);
                 }
             }
         });
 
         CombatGui.register();
         System.out.println("[NEWGEN6] Client ready | X=Debug  C=AI  F6=Save  F7=Eval  F8=Replay  F9=Emergency");
+    }
+
+
+    private static final boolean[] rawDown = new boolean[6];
+
+    private static boolean rawEdge(MinecraftClient client, int glfwKey, int slot) {
+        if (client == null || client.getWindow() == null) return false;
+        if (client.currentScreen != null) return false;
+        long handle = client.getWindow().getHandle();
+        boolean down = org.lwjgl.glfw.GLFW.glfwGetKey(handle, glfwKey) == org.lwjgl.glfw.GLFW.GLFW_PRESS;
+        boolean edge = down && !rawDown[slot];
+        rawDown[slot] = down;
+        return edge;
     }
 
     public static void onTick(MinecraftClient mc) {
