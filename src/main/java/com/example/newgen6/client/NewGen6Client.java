@@ -1,102 +1,187 @@
 package com.example.newgen6.client;
 
-import com.example.newgen6.rl.CombatAgent;
-import com.example.newgen6.rl.RLConstants;
+import com.example.newgen6.rl.ActionSpace;
+import com.example.newgen6.rl.FeatureExtractor;
+import com.example.newgen6.rl.PPOAgent;
+import com.example.newgen6.hud.CombatGui;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
 import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
-import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.gui.DrawContext;
+import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.render.RenderTickCounter;
 import net.minecraft.client.util.InputUtil;
-import net.minecraft.util.Identifier;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.player.PlayerEntity;
+import net.minecraft.util.hit.EntityHitResult;
+import net.minecraft.util.hit.HitResult;
+import net.minecraft.util.math.Box;
+import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 
 /**
- * Client entry: C = AI, X = HUD, V = aim-only curriculum toggle.
- * AI starts OFF. aimOnly starts ON (phase-1 aim training).
+ * Client entrypoint + main RL loop + keybinds.
  *
- * 1.21.11: KeyBinding category is KeyBinding.Category, not a raw String.
+ * X = toggle Debug HUD
+ * C = toggle AI on/off
+ * F6 = save checkpoint
+ * F7 = toggle TRAIN / EVAL
+ * F8 = start/stop replay recording
+ * F9 = emergency stop / clear
  */
-public final class NewGen6Client implements ClientModInitializer {
-    public static final CombatAgent AGENT = new CombatAgent();
+public class NewGen6Client implements ClientModInitializer {
 
-    private static final KeyBinding.Category CATEGORY =
-            KeyBinding.Category.create(Identifier.of("newgen6", "main"));
+    public static final PPOAgent AGENT = new PPOAgent();
 
-    private static KeyBinding aiToggle;
-    private static KeyBinding hudToggle;
-    private static KeyBinding aimOnlyToggle;
+    private static boolean aiEnabled = true;
+    private static boolean debugVisible = true;
+    private static long tickCounter = 0;
+
+    public static boolean flagHit = false;
+    public static boolean flagCrit = false;
+    public static boolean flagHurt = false;
+    public static float lastDmgDealt = 0f;
+    public static float lastDmgTaken = 0f;
+
+    private static KeyBinding keyToggleAI;
+    private static KeyBinding keyToggleDebug;
+    private static KeyBinding keySave;
+    private static KeyBinding keyEval;
+    private static KeyBinding keyReplay;
+    private static KeyBinding keyEmergency;
 
     @Override
     public void onInitializeClient() {
-        aiToggle = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.newgen6.ai",
-                InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_C,
-                CATEGORY
-        ));
-        hudToggle = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.newgen6.hud",
-                InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_X,
-                CATEGORY
-        ));
-        aimOnlyToggle = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.newgen6.aimonly",
-                InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_V,
-                CATEGORY
-        ));
+        keyToggleAI = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.newgen6.toggle_ai", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_C, "category.newgen6"));
+        keyToggleDebug = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.newgen6.toggle_debug", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_X, "category.newgen6"));
+        keySave = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.newgen6.save", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F6, "category.newgen6"));
+        keyEval = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.newgen6.eval", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F7, "category.newgen6"));
+        keyReplay = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.newgen6.replay", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F8, "category.newgen6"));
+        keyEmergency = KeyBindingHelper.registerKeyBinding(new KeyBinding(
+                "key.newgen6.emergency", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F9, "category.newgen6"));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            while (aiToggle.wasPressed()) AGENT.toggleAi();
-            while (hudToggle.wasPressed()) AGENT.toggleHud();
-            while (aimOnlyToggle.wasPressed()) AGENT.toggleAimOnly();
-            AGENT.clientTick(client);
+            while (keyToggleAI.wasPressed()) {
+                aiEnabled = !aiEnabled;
+                System.out.println("[NEWGEN6] AI " + (aiEnabled ? "ENABLED" : "DISABLED"));
+            }
+            while (keyToggleDebug.wasPressed()) {
+                debugVisible = !debugVisible;
+                System.out.println("[NEWGEN6] Debug HUD " + (debugVisible ? "ON" : "OFF"));
+            }
+            while (keySave.wasPressed()) {
+                AGENT.getCheckpoints().saveLatest(AGENT);
+                AGENT.getCheckpoints().saveVersioned(AGENT);
+                System.out.println("[NEWGEN6] Manual save complete");
+            }
+            while (keyEval.wasPressed()) {
+                boolean now = !AGENT.isTraining();
+                AGENT.setTraining(now);
+                System.out.println("[NEWGEN6] Mode → " + (now ? "TRAINING" : "EVALUATION"));
+            }
+            while (keyReplay.wasPressed()) {
+                if (AGENT.getReplay().isRecording()) AGENT.getReplay().stopAndSave();
+                else AGENT.getReplay().start();
+            }
+            while (keyEmergency.wasPressed()) {
+                if (AGENT.isEmergency()) {
+                    AGENT.clearEmergency();
+                    aiEnabled = true;
+                    System.out.println("[NEWGEN6] Emergency cleared");
+                } else {
+                    AGENT.emergencyStop();
+                    aiEnabled = false;
+                }
+            }
         });
 
-        HudRenderCallback.EVENT.register(NewGen6Client::renderHud);
+        CombatGui.register();
+        System.out.println("[NEWGEN6] Client ready | X=Debug  C=AI  F6=Save  F7=Eval  F8=Replay  F9=Emergency");
     }
 
-    private static void renderHud(DrawContext ctx, RenderTickCounter tickCounter) {
-        if (!AGENT.hudEnabled) return;
-        MinecraftClient mc = MinecraftClient.getInstance();
-        if (mc.player == null) return;
+    public static void onTick(MinecraftClient mc) {
+        if (!aiEnabled || mc.player == null || AGENT.isEmergency()) return;
+        tickCounter++;
 
-        int x = 4;
-        int y = 4;
-        int color = 0xFFE0E0E0;
-        int dim = 0xFF888888;
+        ClientPlayerEntity self = mc.player;
+        FeatureExtractor.ObsContext ctx = new FeatureExtractor.ObsContext();
+        ctx.tick = tickCounter;
 
-        ctx.fill(x - 2, y - 2, x + 170, y + 88, 0xC0101018);
-        draw(ctx, mc, "NEWGEN6 RL  229F×200T", x, y, color);
-        draw(ctx, mc, "AI: " + (AGENT.aiEnabled ? "ON" : "OFF")
-                        + "  TRAIN: " + (AGENT.trainEnabled ? "ON" : "OFF"),
-                x, y + 10, AGENT.aiEnabled ? 0xFF7CFF7C : 0xFFFF6666);
-        draw(ctx, mc, "MODE: " + (AGENT.aimOnly ? "AIM-ONLY" : "FULL"),
-                x, y + 20, AGENT.aimOnly ? 0xFF7CC8FF : 0xFFFFC87C);
-        draw(ctx, mc, "STEPS: " + AGENT.envSteps + "  UPD: " + AGENT.trainer.updates(), x, y + 30, dim);
-        draw(ctx, mc, String.format("REW: %+.3f  MEAN: %+.3f", AGENT.lastReward, AGENT.meanReward), x, y + 40, dim);
-        draw(ctx, mc, String.format("AIM: %.3f  Y%d/P%d", AGENT.lastAimError,
-                RLConstants.YAW_BUCKETS, RLConstants.PITCH_BUCKETS), x, y + 50, dim);
-        if (AGENT.lastAction != null) {
-            draw(ctx, mc, String.format("MV:%d J%d S%d A%d SN%d",
-                    AGENT.lastAction.move,
-                    AGENT.lastAction.jump ? 1 : 0,
-                    AGENT.lastAction.sprint ? 1 : 0,
-                    AGENT.lastAction.attack ? 1 : 0,
-                    AGENT.lastAction.sneak ? 1 : 0), x, y + 60, dim);
-            draw(ctx, mc, String.format("AIM BKT Y:%d P:%d",
-                    AGENT.lastAction.yawBucket, AGENT.lastAction.pitchBucket), x, y + 70, dim);
+        ctx.health = self.getHealth();
+        ctx.hunger = self.getHungerManager().getFoodLevel();
+        ctx.absorption = self.getAbsorptionAmount();
+        Vec3d vel = self.getVelocity();
+        ctx.velX = (float) vel.x;
+        ctx.velY = (float) vel.y;
+        ctx.velZ = (float) vel.z;
+        ctx.yaw = self.getYaw();
+        ctx.pitch = self.getPitch();
+        ctx.attackCooldown = self.getAttackCooldownProgress(0f);
+        ctx.onGround = self.isOnGround();
+        ctx.sprinting = self.isSprinting();
+        ctx.sneaking = self.isSneaking();
+        ctx.jumping = !self.isOnGround() && vel.y > 0;
+        ctx.fallDistance = self.fallDistance;
+        ctx.isInWater = self.isTouchingWater();
+        ctx.isOnFire = self.isOnFire();
+
+        PlayerEntity target = findTarget(mc, self);
+        if (target != null) {
+            ctx.hasTarget = true;
+            Vec3d tPos = target.getPos();
+            Vec3d sPos = self.getPos();
+            ctx.tDx = (float) (tPos.x - sPos.x);
+            ctx.tDy = (float) (tPos.y - sPos.y);
+            ctx.tDz = (float) (tPos.z - sPos.z);
+            Vec3d tVel = target.getVelocity();
+            ctx.tVelX = (float) tVel.x;
+            ctx.tVelY = (float) tVel.y;
+            ctx.tVelZ = (float) tVel.z;
+            ctx.targetHealth = target.getHealth();
+            ctx.targetHurtTime = target.hurtTime;
+            ctx.targetAttackCooldown = target.getAttackCooldownProgress(0f);
+            ctx.targetSprinting = target.isSprinting();
+            ctx.targetOnGround = target.isOnGround();
+            ctx.targetSneaking = target.isSneaking();
+            HitResult hr = mc.crosshairTarget;
+            ctx.isLookingAtTarget = hr instanceof EntityHitResult ehr && ehr.getEntity() == target;
         }
-        draw(ctx, mc, "CTX: " + AGENT.context.size() + "/" + RLConstants.CONTEXT_TICKS
-                + "  C/X/V", x, y + 80, dim);
+
+        ctx.blockUnderFeet = self.isOnGround() ? 1f : 0f;
+        ctx.inLiquid = self.isTouchingWater() || self.isInLava();
+
+        ActionSpace.Control ctrl = AGENT.act(ctx, flagHit, flagCrit, flagHurt, lastDmgDealt, lastDmgTaken);
+        flagHit = flagCrit = flagHurt = false;
+        lastDmgDealt = lastDmgTaken = 0f;
+
+        InputController.apply(mc, ctrl);
     }
 
-    private static void draw(DrawContext ctx, MinecraftClient mc, String s, int x, int y, int color) {
-        ctx.drawText(mc.textRenderer, s, x, y, color, true);
+    private static PlayerEntity findTarget(MinecraftClient mc, ClientPlayerEntity self) {
+        if (mc.crosshairTarget instanceof EntityHitResult ehr
+                && ehr.getEntity() instanceof PlayerEntity pe && pe != self) {
+            return pe;
+        }
+        PlayerEntity nearest = null;
+        double best = 36.0;
+        Box box = self.getBoundingBox().expand(6.0);
+        for (Entity e : mc.world.getOtherEntities(self, box)) {
+            if (e instanceof PlayerEntity pe) {
+                double d = self.squaredDistanceTo(pe);
+                if (d < best) {
+                    best = d;
+                    nearest = pe;
+                }
+            }
+        }
+        return nearest;
     }
+
+    public static boolean isAiEnabled() { return aiEnabled; }
+    public static boolean isDebugVisible() { return debugVisible; }
 }
