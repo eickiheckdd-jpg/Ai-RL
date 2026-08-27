@@ -16,6 +16,7 @@ import net.minecraft.entity.player.PlayerEntity;
 import net.minecraft.util.hit.EntityHitResult;
 import net.minecraft.util.hit.HitResult;
 import net.minecraft.util.math.Box;
+import net.minecraft.util.Identifier;
 import net.minecraft.util.math.Vec3d;
 import org.lwjgl.glfw.GLFW;
 
@@ -50,7 +51,7 @@ public class NewGen6Client implements ClientModInitializer {
     private static KeyBinding keyReplay;
     private static KeyBinding keyEmergency;
 
-    private static final KeyBinding.Category CATEGORY = KeyBinding.Category.create("newgen6");
+    private static final KeyBinding.Category CATEGORY = KeyBinding.Category.create(Identifier.of("newgen6", "main"));
 
     @Override
     public void onInitializeClient() {
