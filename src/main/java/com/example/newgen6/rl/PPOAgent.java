@@ -93,8 +93,8 @@ public final class PPOAgent {
         float yawD = out.look[0];
         float pitchD = out.look[1];
         if (training) {
-            yawD += (rng.nextFloat() - 0.5f) * curriculum.getNoiseScale() * 1.5f;
-            pitchD += (rng.nextFloat() - 0.5f) * curriculum.getNoiseScale() * 1.2f;
+            yawD += (rng.nextFloat() - 0.5f) * curriculum.getNoiseScale() * 0.55f;
+            pitchD += (rng.nextFloat() - 0.5f) * curriculum.getNoiseScale() * 0.40f;
         }
 
         ActionSpace.Control ctrl = ActionSpace.decode(
