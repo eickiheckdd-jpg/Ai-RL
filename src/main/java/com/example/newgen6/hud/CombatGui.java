@@ -64,7 +64,7 @@ public final class CombatGui {
         fill(ctx, left, top, left + panelW, top + panelH, BG);
         fill(ctx, left, top, left + panelW, top + 18, PANEL);
         drawCentered(ctx, mc, "COMBAT AI", left + panelW / 2, top + 2, ACCENT);
-        drawCentered(ctx, mc, "229F×200T", left + panelW / 2, top + 10, MUTED);
+        drawCentered(ctx, mc, "256F×200T", left + panelW / 2, top + 10, MUTED);
 
         int y = top + 22;
         int pad = 4;
@@ -78,7 +78,7 @@ public final class CombatGui {
         int cell = 2;
         int cols = gridW / cell;
         float[] lastObs = agent.getLastNormObs();
-        int shown = Math.min(229, cols * 8);
+        int shown = Math.min(256, cols * 8);
         for (int i = 0; i < shown; i++) {
             int cx = innerL + (i % cols) * cell;
             int cy = y + (i / cols) * cell;
@@ -152,11 +152,13 @@ public final class CombatGui {
     private static boolean[][] movementCells(int action) {
         boolean[][] g = new boolean[3][3];
         switch (action) {
-            case ActionSpace.FORWARD, ActionSpace.SPRINT_FWD, ActionSpace.ATTACK_FWD,
-                 ActionSpace.JUMP_FWD, ActionSpace.CLOSE_IN, ActionSpace.CRIT_ATTEMPT -> g[0][1] = true;
-            case ActionSpace.BACK, ActionSpace.ATTACK_BACK, ActionSpace.BAIT_BACK -> g[2][1] = true;
-            case ActionSpace.LEFT, ActionSpace.STRAFE_LEFT_ATK -> g[1][0] = true;
-            case ActionSpace.RIGHT, ActionSpace.STRAFE_RIGHT_ATK -> g[1][2] = true;
+            case ActionSpace.FORWARD, ActionSpace.SPRINT_FWD, ActionSpace.ATK_FWD,
+                 ActionSpace.JUMP_FWD, ActionSpace.ATK_SPRINT -> g[0][1] = true;
+            case ActionSpace.BACK, ActionSpace.ATK_BACK -> g[2][1] = true;
+            case ActionSpace.LEFT, ActionSpace.ATK_LEFT, ActionSpace.JUMP_LEFT,
+                 ActionSpace.SPRINT_LEFT -> g[1][0] = true;
+            case ActionSpace.RIGHT, ActionSpace.ATK_RIGHT, ActionSpace.JUMP_RIGHT,
+                 ActionSpace.SPRINT_RIGHT -> g[1][2] = true;
             case ActionSpace.FWD_LEFT -> g[0][0] = true;
             case ActionSpace.FWD_RIGHT -> g[0][2] = true;
             case ActionSpace.BACK_LEFT -> g[2][0] = true;
