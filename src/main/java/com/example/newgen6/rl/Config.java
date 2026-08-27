@@ -8,10 +8,10 @@ public final class Config {
     private Config() {}
 
     // Network
-    public static final int OBS_DIM = 229;
-    public static final int HIDDEN1 = 192;
-    public static final int HIDDEN2 = 128;
-    public static final int ACTION_DIM = 48;          // discrete hybrid actions
+    public static final int OBS_DIM = 256; // expanded combat features
+    public static final int HIDDEN1 = 160; // slightly leaner for 2GB/Pojav
+    public static final int HIDDEN2 = 96;
+    public static final int ACTION_DIM = 25;          // pure primitive actions only
     public static final int LOOK_DIM = 2;             // continuous yaw/pitch deltas
 
     // PPO
@@ -42,4 +42,7 @@ public final class Config {
 
     // Reward scaling
     public static final float REWARD_SCALE = 0.12f;
+    public static final float CURIOSITY_COEF_START = 0.08f;
+    public static final float CURIOSITY_COEF_END = 0.01f;
+    public static final int RND_FEAT_DIM = 32;
 }
