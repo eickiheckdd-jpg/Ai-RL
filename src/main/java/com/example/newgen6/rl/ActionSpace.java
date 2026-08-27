@@ -53,8 +53,8 @@ public final class ActionSpace {
                                  float lookScale, float confidence) {
         Control c = new Control();
         c.confidence = confidence;
-        c.mouseDx = mouseDx * lookScale * 4.5f;
-        c.mouseDy = mouseDy * lookScale * 3.2f;
+        c.mouseDx = mouseDx * lookScale * 1.35f;
+        c.mouseDy = mouseDy * lookScale * 1.05f;
 
         switch (discrete) {
             case FORWARD, SPRINT_FWD, ATTACK_FWD, CLOSE_IN -> {
