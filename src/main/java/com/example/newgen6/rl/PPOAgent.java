@@ -17,6 +17,7 @@ public final class PPOAgent {
     private final StatsLogger stats;
     private final ActionMask actionMask;
     private final ReplayRecorder replay;
+    private final RNDCuriosity rnd;
     private final Random rng = new Random();
 
     private final float[] obs = new float[Config.OBS_DIM];
@@ -49,6 +50,7 @@ public final class PPOAgent {
         stats = new StatsLogger();
         actionMask = new ActionMask();
         replay = new ReplayRecorder();
+        rnd = new RNDCuriosity(Config.OBS_DIM);
 
         // try resume
         checkpoints.loadLatest(this);
@@ -110,13 +112,29 @@ public final class PPOAgent {
 
         float reward = rewardCalc.compute(ctx, ctrl, didHit, didCrit, didTakeDamage,
                 dmgDealt, dmgTaken, curriculum.getStage());
+        // curiosity (annealed by curriculum stage)
+        float curCoef = Config.CURIOSITY_COEF_START;
+        int st = curriculum.getStage();
+        if (st >= 4) curCoef = Config.CURIOSITY_COEF_END;
+        else if (st >= 2) curCoef = (Config.CURIOSITY_COEF_START + Config.CURIOSITY_COEF_END) * 0.5f;
+        float intrinsic = 0f;
+        if (training) {
+            intrinsic = rnd.intrinsic(normObs, true);
+            reward += curCoef * intrinsic;
+        }
+
         lastReward = reward;
-        lastRewardBreakdown = String.format("r=%.3f hit=%s crit=%s dmg+%.1f/-%.1f",
-                reward, didHit, didCrit, dmgDealt, dmgTaken);
+        lastRewardBreakdown = String.format("r=%.3f i=%.2f hit=%s crit=%s",
+                reward, intrinsic, didHit, didCrit);
         try {
             com.example.newgen6.hud.CombatGui.pushWave(reward);
             com.example.newgen6.hud.CombatGui.pushAim(yawD, pitchD);
         } catch (Throwable ignored) {}
+
+        // update combat history features
+        features.notifyHit(didHit, didCrit, dmgDealt);
+        if (didTakeDamage) features.notifyHurt();
+        if (ctrl.attack) features.notifyAttack();
 
         stats.onStep(reward, dmgDealt, dmgTaken, didHit, didCrit);
 
