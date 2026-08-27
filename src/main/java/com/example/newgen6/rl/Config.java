@@ -35,10 +35,10 @@ public final class Config {
     public static final int[] STAGE_THRESHOLDS = {0, 8000, 25000, 60000, 120000, 250000, 500000};
 
     // Exploration / speed control
-    public static final float INITIAL_NOISE = 0.35f;  // high → shaking early
+    public static final float INITIAL_NOISE = 0.40f;  // soft exploratory shake early
     public static final float FINAL_NOISE = 0.04f;
-    public static final float LOOK_SCALE_START = 8.0f; // degrees per action early
-    public static final float LOOK_SCALE_END = 2.2f;   // precise aiming later
+    public static final float LOOK_SCALE_START = 1.15f; // small/slow aim early (video-style)
+    public static final float LOOK_SCALE_END = 5.8f;   // faster, stronger aim later
 
     // Reward scaling
     public static final float REWARD_SCALE = 0.12f;
