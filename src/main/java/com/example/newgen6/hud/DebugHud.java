@@ -12,10 +12,10 @@ import net.minecraft.client.gui.DrawContext;
 public final class DebugHud {
 
     public static void register() {
-        HudRenderCallback.EVENT.register(DebugHud::render);
+        HudRenderCallback.EVENT.register((drawContext, tickCounter) -> DebugHud.render(drawContext, tickCounter));
     }
 
-    private static void render(DrawContext ctx, float tickDelta) {
+    private static void render(DrawContext ctx, Object tickCounter) {
         if (!NewGen6Client.isDebugVisible()) return;
 
         MinecraftClient mc = MinecraftClient.getInstance();
