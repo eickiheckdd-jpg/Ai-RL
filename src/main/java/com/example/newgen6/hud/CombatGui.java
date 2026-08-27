@@ -32,7 +32,7 @@ public final class CombatGui {
     private static final float[] pitchHist = new float[PITCH_BUCKETS];
 
     public static void register() {
-        HudRenderCallback.EVENT.register(CombatGui::render);
+        HudRenderCallback.EVENT.register((drawContext, tickCounter) -> CombatGui.render(drawContext, tickCounter));
     }
 
     public static void pushWave(float value) {
@@ -50,7 +50,7 @@ public final class CombatGui {
         pitchHist[pi] += 1f;
     }
 
-    private static void render(DrawContext ctx, float tickDelta) {
+    private static void render(DrawContext ctx, Object tickCounter) {
         if (!NewGen6Client.isDebugVisible()) return;
         MinecraftClient mc = MinecraftClient.getInstance();
         if (mc.player == null || mc.options.hudHidden) return;
