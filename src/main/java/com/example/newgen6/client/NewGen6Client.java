@@ -50,20 +50,22 @@ public class NewGen6Client implements ClientModInitializer {
     private static KeyBinding keyReplay;
     private static KeyBinding keyEmergency;
 
+    private static final KeyBinding.Category CATEGORY = KeyBinding.Category.create("newgen6");
+
     @Override
     public void onInitializeClient() {
         keyToggleAI = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.newgen6.toggle_ai", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_C, "category.newgen6"));
+                "key.newgen6.toggle_ai", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_C, CATEGORY));
         keyToggleDebug = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.newgen6.toggle_debug", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_X, "category.newgen6"));
+                "key.newgen6.toggle_debug", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_X, CATEGORY));
         keySave = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.newgen6.save", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F6, "category.newgen6"));
+                "key.newgen6.save", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F6, CATEGORY));
         keyEval = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.newgen6.eval", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F7, "category.newgen6"));
+                "key.newgen6.eval", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F7, CATEGORY));
         keyReplay = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.newgen6.replay", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F8, "category.newgen6"));
+                "key.newgen6.replay", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F8, CATEGORY));
         keyEmergency = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.newgen6.emergency", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F9, "category.newgen6"));
+                "key.newgen6.emergency", InputUtil.Type.KEYSYM, GLFW.GLFW_KEY_F9, CATEGORY));
 
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
             while (keyToggleAI.wasPressed()) {
@@ -126,18 +128,16 @@ public class NewGen6Client implements ClientModInitializer {
         ctx.sprinting = self.isSprinting();
         ctx.sneaking = self.isSneaking();
         ctx.jumping = !self.isOnGround() && vel.y > 0;
-        ctx.fallDistance = self.fallDistance;
+        ctx.fallDistance = (float) self.fallDistance;
         ctx.isInWater = self.isTouchingWater();
         ctx.isOnFire = self.isOnFire();
 
         PlayerEntity target = findTarget(mc, self);
         if (target != null) {
             ctx.hasTarget = true;
-            Vec3d tPos = target.getPos();
-            Vec3d sPos = self.getPos();
-            ctx.tDx = (float) (tPos.x - sPos.x);
-            ctx.tDy = (float) (tPos.y - sPos.y);
-            ctx.tDz = (float) (tPos.z - sPos.z);
+            ctx.tDx = (float) (target.getX() - self.getX());
+            ctx.tDy = (float) (target.getY() - self.getY());
+            ctx.tDz = (float) (target.getZ() - self.getZ());
             Vec3d tVel = target.getVelocity();
             ctx.tVelX = (float) tVel.x;
             ctx.tVelY = (float) tVel.y;
