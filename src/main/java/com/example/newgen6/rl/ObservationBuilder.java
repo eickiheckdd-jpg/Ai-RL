@@ -5,7 +5,6 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.LivingEntity;
 import net.minecraft.entity.player.PlayerEntity;
-import net.minecraft.item.SwordItem;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 
@@ -13,7 +12,6 @@ import java.util.Arrays;
 
 public final class ObservationBuilder {
     public final float[] observation = new float[AgentConfig.OBS_DIM];
-
     private final float[] history = new float[AgentConfig.HISTORY_TICKS * AgentConfig.OBS_DIM];
     private int historyWrite = 0;
     private int historyCount = 0;
@@ -314,7 +312,7 @@ private void fillPlayer(MinecraftClient client) {
         observation[5] = p.isOnGround() ? 1.0f : 0.0f;
         observation[6] = p.isSprinting() ? 1.0f : 0.0f;
         observation[7] = p.isSneaking() ? 1.0f : 0.0f;
-        observation[8] = clamp(p.fallDistance / 16.0f, -2.0f, 2.0f);
+        observation[8] = clamp((float) p.fallDistance / 16.0f, -2.0f, 2.0f);
 
         Vec3d v = p.getVelocity();
         observation[9] = clamp((float) v.x / 10.0f, -2.0f, 2.0f);
@@ -336,10 +334,10 @@ private void fillPlayer(MinecraftClient client) {
         observation[18] = 0.0f;
         observation[19] = clamp(damageTakenEma, 0.0f, 1.0f);
 
-        observation[20] = p.input.pressingForward ? 1.0f : 0.0f;
-        observation[21] = p.input.pressingBack ? 1.0f : 0.0f;
-        observation[22] = p.input.pressingLeft ? 1.0f : 0.0f;
-        observation[23] = p.input.pressingRight ? 1.0f : 0.0f;
+        observation[20] = client.options.forwardKey.isPressed() ? 1.0f : 0.0f;
+        observation[21] = client.options.backKey.isPressed() ? 1.0f : 0.0f;
+        observation[22] = client.options.leftKey.isPressed() ? 1.0f : 0.0f;
+        observation[23] = client.options.rightKey.isPressed() ? 1.0f : 0.0f;
 
         observation[24] = client.options.jumpKey.isPressed() ? 1.0f : 0.0f;
         observation[25] = client.options.sneakKey.isPressed() ? 1.0f : 0.0f;
@@ -347,7 +345,7 @@ private void fillPlayer(MinecraftClient client) {
 
         observation[27] = p.isTouchingWater() ? 1.0f : 0.0f;
         observation[28] = p.isOnFire() ? 1.0f : 0.0f;
-        observation[29] = p.getMainHandStack().getItem() instanceof SwordItem ? 1.0f : 0.0f;
+        observation[29] = p.getMainHandStack().getItem().getTranslationKey().contains("sword") ? 1.0f : 0.0f;
 
         observation[30] = clamp(episodeTick / 6000.0f, 0.0f, 1.0f);
 
@@ -399,7 +397,11 @@ private void fillPlayer(MinecraftClient client) {
 
         ClientPlayerEntity p = client.player;
 
-        Vec3d rel = target.getPos().subtract(p.getPos());
+        Vec3d rel = new Vec3d(
+                target.getX() - p.getX(),
+                target.getY() - p.getY(),
+                target.getZ() - p.getZ()
+        );
 
         observation[40] = 1.0f;
         observation[41] = clamp((float) rel.x / 16.0f, -2.0f, 2.0f);
@@ -490,7 +492,7 @@ private void fillPlayer(MinecraftClient client) {
             targetCooldownRate *= 0.9f;
         }
 
-        observation[74] = target.getMainHandStack().getItem() instanceof SwordItem ? 1.0f : 0.0f;
+        observation[74] = target.getMainHandStack().getItem().getTranslationKey().contains("sword") ? 1.0f : 0.0f;
 
         relYawEma = relYawEma * 0.9f + (relYaw / 180.0f) * 0.1f;
         observation[75] = clamp(relYawEma, -1.0f, 1.0f);
