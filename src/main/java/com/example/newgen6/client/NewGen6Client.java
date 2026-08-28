@@ -6,45 +6,24 @@ import com.example.newgen6.rl.AgentController;
 import net.fabricmc.api.ClientModInitializer;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents;
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents;
-import net.fabricmc.fabric.api.client.keybinding.v1.KeyBindingHelper;
 import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
 
 import net.minecraft.client.MinecraftClient;
-import net.minecraft.client.option.KeyBinding;
-import net.minecraft.client.util.InputUtil;
 
 import org.lwjgl.glfw.GLFW;
 
 public class NewGen6Client implements ClientModInitializer {
     private static AgentController controller;
 
+    private static boolean prevC = false;
+    private static boolean prevX = false;
+
     @Override
     public void onInitializeClient() {
         controller = new AgentController();
 
-        KeyBinding toggleAi = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.newgen6.toggle_ai",
-                InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_C,
-                "category.newgen6.rl"
-        ));
-
-        KeyBinding toggleHud = KeyBindingHelper.registerKeyBinding(new KeyBinding(
-                "key.newgen6.toggle_hud",
-                InputUtil.Type.KEYSYM,
-                GLFW.GLFW_KEY_X,
-                "category.newgen6.rl"
-        ));
-
         ClientTickEvents.END_CLIENT_TICK.register(client -> {
-            while (toggleAi.wasPressed()) {
-                controller.toggleAi();
-            }
-
-            while (toggleHud.wasPressed()) {
-                controller.toggleHud();
-            }
-
+            handleToggles(client);
             controller.onClientTick(client);
         });
 
@@ -56,5 +35,31 @@ public class NewGen6Client implements ClientModInitializer {
         ClientLifecycleEvents.CLIENT_STOPPING.register(client -> {
             controller.saveCheckpointNow();
         });
+    }
+
+    private static void handleToggles(MinecraftClient client) {
+        if (client == null) return;
+
+        try {
+            long window = client.getWindow().getHandle();
+            if (window == 0L) return;
+
+            boolean c = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_C) == GLFW.GLFW_PRESS;
+            boolean x = GLFW.glfwGetKey(window, GLFW.GLFW_KEY_X) == GLFW.GLFW_PRESS;
+
+            if (client.currentScreen == null) {
+                if (c && !prevC) {
+                    controller.toggleAi();
+                }
+
+                if (x && !prevX) {
+                    controller.toggleHud();
+                }
+            }
+
+            prevC = c;
+            prevX = x;
+        } catch (Throwable ignored) {
+        }
     }
 }
