@@ -1,6 +1,7 @@
 package com.example.newgen6.hud;
 
 import com.example.newgen6.rl.AgentController;
+
 import net.minecraft.client.MinecraftClient;
 import net.minecraft.client.gui.DrawContext;
 
@@ -51,9 +52,6 @@ public final class NewGen6Hud {
         y += line;
 
         draw(ctx, client, x, y, String.format("ENTROPY: %.4f", controller.getLastEntropy()), 0xFFFFFFFF);
-        y += line;
-
-        draw(ctx, client, x, y, "FPS: " + client.fps, 0xFFFFFFFF);
         y += line;
 
         draw(ctx, client, x, y, "CHECKPOINT: " + controller.getCheckpointStatus(), 0xFFFFFFFF);
